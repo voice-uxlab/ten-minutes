@@ -57,7 +57,7 @@ test("React StrictMode: onboard → demo → partial picks → reveals → notes
   await user.click(await screen.findByText("예시 고민으로 계속하기 →"));
   await user.click(await screen.findByText("응, 이 질문으로 볼래"));
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(0);
-  await user.click(screen.getByText("직접 번호 고르기"));
+  await user.click(await screen.findByText("직접 번호 고르기"));
   await user.click(await screen.findByLabelText("7번 카드"));
   await user.click(screen.getByLabelText("22번 카드"));
   await screen.findByText(/1개만 더/);
