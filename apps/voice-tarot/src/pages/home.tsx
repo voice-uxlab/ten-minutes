@@ -1,3 +1,5 @@
+import { exportSavedConversations } from "@/features/consultation/test-logger";
+import { personas, type PersonaId } from "../../shared/personas.ts";
 import {
   prepareAudio,
   discardPreparedAudio,
@@ -46,9 +48,9 @@ export function Login() {
         기능이에요.
       </PolicyDialog>
       <PolicyDialog title="개인정보 및 음성 처리 안내">
-        실제 상담 음성은 OpenAI로, 답변 텍스트는 타입캐스트로 전송돼요. 상담
-        요약은 이 브라우저에, 질문과 카드는 이어보기를 위해 앱 서버에 보관돼요.
-        소셜 로그인은 회원 식별자와 닉네임을 사용해요.
+        상담 음성은 OpenAI로, 답변 텍스트는 Typecast로 전송해요. 상담 요약은 이
+        브라우저에, 질문과 카드는 이어보기를 위해 앱 서버에 보관돼요. 소셜
+        로그인은 회원 식별자와 닉네임을 사용해요.
       </PolicyDialog>
     </section>
   );
@@ -99,16 +101,20 @@ export function Onboarding() {
   );
 }
 export function Home({
-  voiceEngine = "realtime",
+  voiceEngine: initialVoiceEngine = "realtime",
 }: {
-  voiceEngine?: "realtime" | "live-typecast";
+  voiceEngine?: Session["voiceEngine"];
 }) {
   const navigate = useNavigate(),
     [p, setP] = useState(profile),
+    [voiceEngine, setVoiceEngine] = useState(initialVoiceEngine),
+    [personaId, setPersonaId] = useState<PersonaId>("cool-unnie"),
     [mic, setMic] = useState(false),
     [consent, setConsent] = useState(false),
     [record, setRecord] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [exporting, setExporting] = useState(false),
+    [exportStatus, setExportStatus] = useState("");
   const auth = useQuery({
     queryKey: ["auth"],
     queryFn: () =>
@@ -123,6 +129,7 @@ export function Home({
       const data = await readingRequest({
         action: "create",
         masterId: "adaptive",
+        personaId,
       });
       const session: Session = {
         ...emptyReading,
@@ -174,14 +181,50 @@ export function Home({
   }
   return (
     <section className="page intro">
-      {voiceEngine === "live-typecast" ? (
-        <Panel title="GPT-Live × Typecast 비교 통화">
-          <p>
-            Live 자막을 Typecast로 읽어줘요. 첫 자막부터 음성 재생까지의 시간을
-            상담 화면에서 확인할 수 있어요.
-          </p>
-        </Panel>
-      ) : null}
+      <fieldset className="panel" disabled={create.isPending}>
+        <legend>상담 버전 선택</legend>
+        <label className="consent">
+          <input
+            type="radio"
+            name="voice-engine"
+            value="realtime"
+            checked={voiceEngine === "realtime"}
+            onChange={() => setVoiceEngine("realtime")}
+          />
+          Realtime + Typecast
+        </label>
+        <label className="consent">
+          <input
+            type="radio"
+            name="voice-engine"
+            value="live-typecast"
+            checked={voiceEngine === "live-typecast"}
+            onChange={() => setVoiceEngine("live-typecast")}
+          />
+          Live + Typecast
+        </label>
+        <p className="hint">
+          둘 다 레나의 목소리 · 1.3배속이에요. 새 통화에 선택한 버전을 적용해요.
+        </p>
+      </fieldset>
+      <fieldset className="panel" disabled={create.isPending}>
+        <legend>테스트 · 페르소나 선택</legend>
+        {personas.map((persona) => (
+          <label className="consent" key={persona.id}>
+            <input
+              type="radio"
+              name="persona"
+              checked={personaId === persona.id}
+              onChange={() => setPersonaId(persona.id)}
+            />
+            {persona.label}
+          </label>
+        ))}
+        <p className="hint">
+          새 음성 통화에 적용돼요. 이어보기는 기존 선택을 유지하고, 시범 통화는
+          고정 예시예요.
+        </p>
+      </fieldset>
       <header>
         <Link to="/login">‹ HOME</Link>
         {auth.data?.user ? (
@@ -225,7 +268,10 @@ export function Home({
           <span>▥</span>
           <div>
             <b>상담 녹음 동의 · 선택</b>
-            <small>내 목소리를 이 기기에만 녹음해요.</small>
+            <small>
+              내 목소리를 녹음해요. 로컬 테스트에서는 서버의 로그 폴더에도
+              저장해요.
+            </small>
           </div>
           <input
             type="checkbox"
@@ -236,8 +282,9 @@ export function Home({
           />
         </label>
         <PolicyDialog title="녹음 안내 보기">
-          내 마이크만 이 기기에 녹음해요. AI 음성은 포함되지 않고, 종료 후
-          파일로 저장할 수 있어요. 녹음 없이도 상담할 수 있어요.
+          내 마이크만 녹음해요. 로컬 테스트에서는 서버에도 저장해요. AI 음성은
+          포함되지 않고, 종료 후 파일로 저장할 수 있어요. 녹음 없이도 상담할 수
+          있어요.
         </PolicyDialog>
         <label className="consent">
           <input
@@ -245,7 +292,9 @@ export function Home({
             checked={consent}
             onChange={(e) => setConsent(e.target.checked)}
           />{" "}
-          음성을 OpenAI에, 답변 텍스트를 타입캐스트에 전송하는 데 동의해요.
+          {voiceEngine === "live-noeul"
+            ? "음성을 OpenAI에 전송하여 음성 상담을 진행하는 데 동의해요."
+            : "음성을 OpenAI에, 답변 텍스트를 타입캐스트에 전송하는 데 동의해요."}
         </label>
       </Panel>
       <Button
@@ -269,6 +318,34 @@ export function Home({
           ? "준비됐어, 공주야. 편하게 시작해."
           : "마이크와 음성 처리에 동의하면 시작할 수 있어요."}
       </p>
+      {import.meta.env.DEV ? (
+        <Panel title="테스트 대화 로그">
+          <p>
+            새 음성 통화는 대화·도구·재생 이벤트를 로컬 서버의 .test-logs 폴더에
+            자동 저장해요.
+          </p>
+          <Button
+            disabled={exporting}
+            onClick={async () => {
+              setExporting(true);
+              setExportStatus("");
+              try {
+                const count = await exportSavedConversations();
+                setExportStatus(`이전 대화 ${count}개를 .md로 저장했어요.`);
+              } catch {
+                setExportStatus(
+                  "일부 로그 저장에 실패했어요. 로컬 서버 연결을 확인해 주세요.",
+                );
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
+            {exporting ? "저장 중…" : "이 브라우저의 이전 대화도 .md로 저장"}
+          </Button>
+          <p role="status">{exportStatus}</p>
+        </Panel>
+      ) : null}
       <div className="extras">
         <Button
           variant="ghost"

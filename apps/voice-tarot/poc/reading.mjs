@@ -12,15 +12,16 @@ export function publicReading(s){
 }
 export function readingContext(s,focusSlots=[]){
  return {tradition:'RWS',version:s.version,question:s.question,plan:s.plan,master:masters[s.masterId],focusSlots,cards:s.cards.filter(c=>s.revealed.includes(c.slot)).map(cardInfo),
-  method:'핵심 의미 → 자리 질문 → 사용자가 제공한 사실 → 카드 간 강화·대조·전환 → 원래 질문의 답과 확인할 행동. 해석 가설과 사실을 구분하며 맞지 않는다는 피드백을 인정한다.',
+  method:'카드 이름·정역 → knowledge.symbol 도상이 knowledge.core 또는 reversed의 의미로 이어지는 이유 → 자리 질문 → 사용자가 제공한 구체적 사실과 연결되는 이유 → 실제 카드 이름을 짚어 강화·대조·전환 설명 → 그 카드 근거로 원래 질문에 답하기. 해석 가설과 사실을 구분하며 맞지 않는다는 피드백을 인정한다.',
   visualPolicy:'knowledge.symbol은 전통 RWS 참고 도상이다. 현재 화면을 보고 발견한 것처럼 말하지 않는다.'};
 }
 export function applyReading(s,action,a={}){
  switch(action){
  case 'review_question':{
-  if(s.cards.length)return error('확정한 카드와 질문은 바꿀 수 없어.');
   const plan=makePlan(a.spreadId,{choices:a.choices,timeframe:a.timeframe});
   if(!plan||typeof a.question!=='string'||!a.question.trim()||a.question.length>300)return error('질문과 유효한 배치가 필요해.');
+  if(s.question===a.question.trim()&&JSON.stringify(s.plan)===JSON.stringify(plan))return {ok:true,unchanged:true,plan:s.plan,questionConfirmed:s.questionConfirmed,picks:[...s.picks],revealed:[...s.revealed],note:'이미 정리한 같은 질문이야. 현재 선택과 공개 상태를 유지하고, 질문 확인을 반복하지 말고 이어서 진행해.'};
+  if(s.cards.length)return error('확정한 카드와 질문은 바꿀 수 없어.');
   s.question=a.question.trim();s.plan=plan;s.positions=[...plan.positions];s.picks=[];s.questionConfirmed=false;
   return {ok:true,plan,master:masters[s.masterId],note:'고민을 자연스럽게 짚고 맞는지 확인해. 방식·설정·자리 목록을 설명하거나 고르게 하지 마.'};
  }

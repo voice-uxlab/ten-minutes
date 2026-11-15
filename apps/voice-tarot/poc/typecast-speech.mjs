@@ -69,7 +69,7 @@ export function bridgeTypecast(client,config,{request=fetch}={}){
   }
   if(data.type!=='text'||typeof data.text!=='string'||data.text.length>4000||typeof data.flush!=='boolean'||(data.generate!==undefined&&typeof data.generate!=='boolean'))throw Error('잘못된 음성 요청이에요.');
   let context=contexts.get(data.id);
-  if(!context){if(contexts.size>=4)throw Error('음성 요청이 너무 많이 쌓였어요.');context={id:data.id,pending:'',previous:'',length:0,jobs:0,final:false};contexts.set(data.id,context);}
+  if(!context){if(contexts.size>=64)throw Error('음성 요청이 너무 많이 쌓였어요.');context={id:data.id,pending:'',previous:'',length:0,jobs:0,final:false};contexts.set(data.id,context);}
   context.length+=data.text.length;
   if(context.final||context.length>20000||queue.length>64)throw Error('음성 요청이 너무 길어요.');
   context.pending+=data.text;

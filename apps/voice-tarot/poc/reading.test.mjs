@@ -79,3 +79,16 @@ test('choice labels are substituted once and interpretation progress survives sn
  assert.equal(publicReading(s).summaryVisited,false);
  applyReading(s,'show_reading',{slot:0});assert.equal(publicReading(s).summaryVisited,true);
 });
+
+test('repeated question review preserves confirmed picks and revealed cards',()=>{
+ const s=ready('situation');
+ applyReading(s,'select_numbers',{picks:[7,22]});
+ const args={question:'어떤 선택을 할까?',spreadId:'situation'};
+ const before=structuredClone(s);
+ const result=applyReading(s,'review_question',args);
+ assert.deepEqual(s,before);assert.equal(result.unchanged,true);
+ applyReading(s,'select_numbers',{picks:[51]});applyReading(s,'confirm_cards');applyReading(s,'reveal_card',{slot:1});
+ const drawn=structuredClone(s);
+ assert.equal(applyReading(s,'review_question',args).unchanged,true);
+ assert.deepEqual(s,drawn);
+});

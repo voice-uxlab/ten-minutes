@@ -1,4 +1,4 @@
-export const defaults={voice:'',model:'ssfm-v30',mode:'smart',emotion:'normal',intensity:1,speed:1.2,pitch:0,silence:null,loudness:null};
+export const defaults={voice:'',model:'ssfm-v30',mode:'smart',emotion:'normal',intensity:1,speed:1.3,pitch:0,silence:null,loudness:null};
 let applied=null;
 export function currentVoiceSettings(){return applied;}
 export function validateVoiceSettings(input){

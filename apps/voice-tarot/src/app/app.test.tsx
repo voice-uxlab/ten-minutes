@@ -9,9 +9,10 @@ import {
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { App } from "./app";
+import { profile, saveProfile, loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
-import { ReadingStore } from "../../poc/reading-store.mjs";
-import { cards } from "../../poc/cards.mjs";
+import { ReadingStore } from "../../server/reading-store.ts";
+import { cards } from "../../shared/cards.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,7 +68,7 @@ test("React StrictMode: onboard → demo → partial picks → reveals → notes
   const cardNodes = [...document.querySelectorAll(".card-wrap")];
   await user.click(await screen.findByText("다음 이야기 듣기 →"));
   expect(document.querySelectorAll(".card-wrap")[1]).toBe(cardNodes[1]);
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 4; i++) {
     await user.click(await screen.findByText("다음 이야기 듣기 →"));
     await waitFor(() =>
       expect(
@@ -100,4 +101,50 @@ test("payment result cannot grant a ticket on reload", async () => {
   await screen.findByText("확인할 결제 내역이 없어요.");
   expect(localStorage.getItem("queen")).toBeNull();
   fireEvent.click(screen.getByText("레나 만나러 가기"));
+});
+
+for (const [label, engine] of [
+  ["Realtime + Typecast", "realtime"],
+  ["Live + Typecast", "live-typecast"],
+] as const) {
+  test(`home selection persists ${engine} for the new session`, async () => {
+    saveProfile({ ...profile(), nick: "버전 확인" });
+    const user = userEvent.setup();
+    render(<App />);
+    const realtime = await screen.findByRole("radio", {
+      name: "Realtime + Typecast",
+    });
+    expect((realtime as HTMLInputElement).checked).toBe(true);
+    await user.click(screen.getByRole("radio", { name: label }));
+    await user.click(
+      screen.getByRole("radio", { name: "테스트 · 솔직한 상담 친구" }),
+    );
+    await user.click(screen.getByText("시범 통화"));
+    await screen.findByText("예시 고민으로 계속하기 →");
+    expect(loadSession(profile().last!.readingId)?.voiceEngine).toBe(engine);
+    expect(loadSession(profile().last!.readingId)?.personaId).toBe(
+      "test-friend",
+    );
+  });
+}
+
+test("Live comparison link resets a previous Realtime selection", async () => {
+  saveProfile({ ...profile(), nick: "비교 확인" });
+  const user = userEvent.setup();
+  render(<App />);
+  expect(
+    (
+      (await screen.findByRole("radio", {
+        name: "Realtime + Typecast",
+      })) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+  await user.click(screen.getByRole("link", { name: "Live 비교 통화" }));
+  expect(
+    (
+      (await screen.findByRole("radio", {
+        name: "Live + Typecast",
+      })) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
 });

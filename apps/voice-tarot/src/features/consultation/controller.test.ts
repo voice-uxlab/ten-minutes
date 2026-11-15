@@ -2,18 +2,35 @@ import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ReadingStore } from "../../../poc/reading-store.mjs";
-import { cards } from "../../../poc/cards.mjs";
+import { ReadingStore } from "../../../server/reading-store.ts";
+import { cards } from "../../../shared/cards.ts";
 import { Consultation, type RealtimeEvent } from "./controller";
 import { emptyReading, type Session } from "@/api/types";
 import { profile, saveProfile, loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
-vi.mock("../../../poc/speech.mjs", () => ({
+const audioMock = vi.hoisted(() => ({
+  busy: false,
+  state: (_busy: boolean) => { void _busy; },
+  appended: [] as Array<[string, boolean | undefined]>,
+  playback: (_text: string) => {
+    void _text;
+  },
+}));
+vi.mock("./speech.ts", () => ({
   displaySpeech: (s: string) => s,
   SpeechPlayer: class {
-    busy = false;
+    get busy() { return audioMock.busy; }
+    constructor(
+      _context: unknown,
+      options: { onPlaybackStart: (text: string) => void; onState: (busy: boolean) => void },
+    ) {
+      audioMock.playback = options.onPlaybackStart;
+      audioMock.state = options.onState;
+    }
     async connect() {}
-    append() {}
+    append(text: string, flush?: boolean) {
+      audioMock.appended.push([text, flush]);
+    }
     cancel() {}
     close() {}
   },
@@ -50,6 +67,8 @@ beforeEach(async () => {
   localStorage.clear();
   queryClient.clear();
   sends.length = 0;
+  audioMock.appended = [];
+  audioMock.busy = false;
   mutations = {};
   dir = await mkdtemp(join(tmpdir(), "react-tarot-"));
   store = new ReadingStore(dir, () =>
@@ -58,6 +77,8 @@ beforeEach(async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === "/test-logs")
+        return Response.json({ path: ".test-logs/test.md" });
       if (path === "/session") return Response.json({ value: "test-token" });
       if (path.startsWith("https://api.openai.com/"))
         return new Response("answer");
@@ -111,7 +132,7 @@ async function emit(name: string, args: unknown, id: string) {
   };
   await Promise.all([controller.event(event), controller.event(event)]);
 }
-test("partial picks, same-card confirmation, grouped five-card reading, flow notes and reload report", async () => {
+test("partial picks, same-card confirmation, sequential three-card reading, flow notes and reload report", async () => {
   controller = new Consultation(await session());
   await controller.start();
   expect(controller.getSnapshot().session.cards).toHaveLength(0);
@@ -122,36 +143,30 @@ test("partial picks, same-card confirmation, grouped five-card reading, flow not
   });
   await controller.command("confirm_question");
   await controller.command("select_numbers", { picks: [7, 22] });
-  expect(controller.getSnapshot().heading).toContain("3개만 더");
+  expect(controller.getSnapshot().heading).toContain("1개만 더");
   expect(controller.getSnapshot().session.cards).toHaveLength(0);
-  await controller.command("select_numbers", { picks: [22, 51, 15, 35] });
-  expect(controller.getSnapshot().session.picks).toEqual([7, 22, 51, 15, 35]);
+  await controller.command("select_numbers", { picks: [22, 51] });
+  expect(controller.getSnapshot().session.picks).toEqual([7, 22, 51]);
   await controller.command("confirm_cards");
   const chosen = structuredClone(controller.getSnapshot().session.cards);
   await controller.command("confirm_cards");
   expect(controller.getSnapshot().session.cards).toEqual(chosen);
-  for (let slot = 1; slot <= 5; slot++)
+  for (let slot = 1; slot <= 3; slot++) {
     await controller.command("reveal_card", { slot });
-  await controller.command("show_reading", { slots: [1, 3] });
-  expect(controller.getSnapshot().active).toEqual([1, 3]);
+    await controller.command("show_reading", { slot });
+    expect(controller.getSnapshot().active).toEqual([slot]);
+  }
   await controller.command("show_reading", { slot: 0 });
-  await controller.command("request_clarifier", {
-    slot: 2,
-    question: "부담을 줄이려면?",
-  });
-  await controller.command("confirm_clarifier");
-  await controller.command("select_numbers", { picks: [9] });
-  await controller.command("confirm_cards");
-  expect(controller.getSnapshot().session.cards.slice(0, 5)).toEqual(chosen);
-  await controller.command("reveal_card", { slot: 6 });
+  expect((await controller.command("request_clarifier", {slot: 2, question: "more"})).error).toBeTruthy();
+  expect(controller.getSnapshot().session.cards).toEqual(chosen);
   await controller.end();
   const saved = loadSession(controller.getSnapshot().session.readingId)!;
   expect(saved.ended).toBe(true);
-  expect(saved.cards).toHaveLength(6);
+  expect(saved.cards).toHaveLength(3);
   expect(saved.notes.some((n) => n.stageLabel === "종합과 다음 행동")).toBe(
     true,
   );
-  expect(saved.report?.readings).toHaveLength(6);
+  expect(saved.report?.readings).toHaveLength(3);
 });
 test("live duplicate tool events mutate once; remount reconnect does not charge a second ticket", async () => {
   vi.stubGlobal(
@@ -175,9 +190,35 @@ test("live duplicate tool events mutate once; remount reconnect does not charge 
   controller = new Consultation(await session(false));
   await controller.start();
   expect(profile().tickets).toBe(1);
+  await controller.event({
+    type: "response.created",
+    response: { id: "spoken" },
+  });
+  await controller.event({
+    type: "response.output_text.delta",
+    response_id: "spoken",
+    delta: "카드의 상징을 ",
+  });
+  expect(audioMock.appended).toHaveLength(0);
+  expect(controller.getSnapshot().caption).toBe("");
+  await controller.event({
+    type: "response.output_text.delta",
+    response_id: "spoken",
+    delta: "살펴볼게. 마지막 말",
+  });
+  expect(audioMock.appended).toEqual([["카드의 상징을 살펴볼게.", true]]);
+  expect(controller.getSnapshot().caption).toBe("");
+  audioMock.playback("카드의 상징을 살펴볼게.");
+  expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게.");
+  await controller.event({
+    type: "response.output_text.done",
+    response_id: "spoken",
+    text: "카드의 상징을 살펴볼게. 마지막 말",
+  });
+  expect(audioMock.appended.at(-1)).toEqual([" 마지막 말", true]);
   await emit(
     "review_question",
-    { question: "오늘 주목할 점?", spreadId: "focus" },
+    { question: "오늘 주목할 점?", spreadId: "situation" },
     "one",
   );
   expect(mutations.review_question).toBe(1);
@@ -189,11 +230,66 @@ test("live duplicate tool events mutate once; remount reconnect does not charge 
   await emit("confirm_question", {}, "two");
   await emit("select_numbers", { picks: [7] }, "three");
   expect(controller.getSnapshot().session.picks).toEqual([7]);
+  const beforeRepeat = controller.getSnapshot();
+  const noteCount = beforeRepeat.session.notes.length;
+  await emit(
+    "review_question",
+    { question: "오늘 주목할 점?", spreadId: "situation" },
+    "repeat-question",
+  );
+  expect(controller.getSnapshot().phase).toBe(beforeRepeat.phase);
+  expect(controller.getSnapshot().session.picks).toEqual([7]);
+  expect(controller.getSnapshot().session.questionConfirmed).toBe(true);
+  expect(controller.getSnapshot().session.notes).toHaveLength(noteCount);
   const id = controller.getSnapshot().session.readingId;
   controller.dispose();
   controller = new Consultation(loadSession(id)!);
   await controller.start();
   expect(profile().tickets).toBe(1);
   expect(controller.getSnapshot().session.picks).toEqual([7]);
-  expect(controller.getSnapshot().phase).toBe("confirm");
+  expect(controller.getSnapshot().phase).toBe("picking");
+  // Continue exclusively through model tool events, with no UI interactions.
+  const caption = controller.getSnapshot().caption;
+  await emit("select_numbers", {picks: [22,51]}, "remaining");
+  await emit("confirm_cards", {}, "four");
+  await emit("reveal_card", { slot: 1 }, "five");
+  await emit("show_reading", { slot: 1 }, "six");
+  expect((await controller.command("reveal_card", {slot:2})).error).toBeTruthy();
+  for (const slot of [2,3]) {
+    audioMock.playback("카드 해석.");
+    audioMock.busy = true;
+    let settled = false;
+    const advancing = emit("reveal_card", {slot}, `reveal-${slot}`).then(() => { settled = true; });
+    const responseCount = sends.filter(e => e.type === "response.create").length;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(settled).toBe(false);
+    expect(controller.getSnapshot().session.revealed).not.toContain(slot);
+    expect(sends.filter(e => e.type === "response.create")).toHaveLength(responseCount);
+    audioMock.busy = false;
+    audioMock.state(false);
+    await advancing;
+    expect(controller.getSnapshot().session.revealed).not.toContain(slot);
+    expect(sends.filter(e => e.type === "response.create")).toHaveLength(responseCount);
+    const afterAdvance = sends.length;
+    await new Promise(resolve => setTimeout(resolve, 750));
+    expect(sends).toHaveLength(afterAdvance); // idle callback must not start a second continuation
+    await controller.event({type: "input_audio_buffer.speech_started", item_id: `feedback-${slot-1}`});
+    await emit("reveal_card", {slot}, `after-feedback-${slot}`);
+    expect(controller.getSnapshot().session.revealed).toContain(slot);
+    await emit("show_reading", {slot}, `read-${slot}`);
+  }
+  audioMock.playback("세 번째 카드 해석.");
+  expect((await controller.command("show_reading", {slot:0})).awaitingUser).toBe(true);
+  await controller.event({type: "input_audio_buffer.speech_started", item_id: "feedback-3"});
+  await emit("show_reading", { slot: 0 }, "seven");
+  expect(controller.getSnapshot().session.summaryVisited).toBe(true);
+  expect(controller.getSnapshot().session.revealed).toEqual([1,2,3]);
+  expect(controller.getSnapshot().caption).toContain(caption);
+  expect(mutations.confirm_cards).toBe(1);
+  audioMock.busy = true;
+  const reveals = mutations.reveal_card;
+  const pendingReveal = controller.command("reveal_card", {slot: 2});
+  controller.dispose();
+  expect((await pendingReveal).error).toBeTruthy();
+  expect(mutations.reveal_card).toBe(reveals);
 });

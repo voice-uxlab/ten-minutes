@@ -2,9 +2,10 @@ export function displaySpeech(text) {return text.replace(/\[[^\]]*\]/g,'').repla
 
 // One browser socket per call; independent contexts separate interrupted answers.
 export class SpeechPlayer {
-  constructor(context, {onState = () => {}, onError = () => {}, onFirstAudio = () => {}, destination = context.destination, socketFactory = url => new WebSocket(url)} = {}) {
-    Object.assign(this, {context, destination, onState, onError, onFirstAudio, socketFactory});
+  constructor(context, {onState = () => {}, onError = () => {}, onFirstAudio = () => {}, onPlaybackStart = () => {}, destination = context.destination, socketFactory = url => new WebSocket(url)} = {}) {
+    Object.assign(this, {context, destination, onState, onError, onFirstAudio, onPlaybackStart, socketFactory});
     this.sources = new Set();
+    this.captionTimers = new Set();
     this.turns = [];
     this.serial = 0;
     this.nextAt = 0;
@@ -39,12 +40,13 @@ export class SpeechPlayer {
   append(delta, flush = false) {
     if(this.closed || !this.ready || (!delta && !this.current))return;
     if(!this.current) {
-      this.current = {id:`speech-${++this.serial}`, text:'', audio:[], remainder:new Uint8Array(0), first:true, done:false};
+      this.current = {id:`speech-${++this.serial}`, text:'', caption:'', audio:[], remainder:new Uint8Array(0), first:true, done:false};
       this.turns.push(this.current);
       this.onState(true);
     }
     const turn = this.current;
     turn.text += delta;
+    turn.caption += delta;
     // Send complete words as they arrive; never invent spaces inside Korean words.
     const sentences = [...turn.text.matchAll(/[.!?。！？](?:[”’"'])?(?=\s|$)/g)];
     const lastSentence = sentences.at(-1);
@@ -77,7 +79,21 @@ export class SpeechPlayer {
         source.onended=()=>{this.sources.delete(source);source.disconnect();if(!this.busy)this.onState(false);};
         const at=Math.max(this.context.currentTime+0.025,this.nextAt);
         source.start(at);this.nextAt=at+buffer.duration;
-        if(turn.first){turn.first=false;this.onFirstAudio();}
+        if(turn.first){
+          turn.first=false;this.onFirstAudio();
+          // Follow the audio clock, including queued audio and suspended contexts.
+          const notify = () => {
+            this.captionTimers.delete(timer);
+            if(this.closed)return;
+            const remaining = at - this.context.currentTime;
+            if(remaining > 0 || this.context.state === 'suspended') {
+              timer=setTimeout(notify,Math.max(16,remaining*1000));
+              this.captionTimers.add(timer);
+            } else this.onPlaybackStart(turn.caption);
+          };
+          let timer=setTimeout(notify,Math.max(0,(at-this.context.currentTime)*1000));
+          this.captionTimers.add(timer);
+        }
       }
       if(!turn.done)break;
       if(turn.remainder.length || turn.first)return this.fail('생성된 음성이 없거나 중간에 끊겼어요.');
@@ -86,6 +102,8 @@ export class SpeechPlayer {
     if(!this.busy)this.onState(false);
   }
   cancel() {
+    for(const timer of this.captionTimers)clearTimeout(timer);
+    this.captionTimers.clear();
     for(const turn of this.turns){clearTimeout(turn.timeout);this.send({type:'cancel',id:turn.id});}
     this.turns=[];this.current=null;
     for(const source of this.sources){source.onended=null;source.stop();source.disconnect();}

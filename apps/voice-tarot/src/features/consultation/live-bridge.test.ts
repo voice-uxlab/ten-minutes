@@ -8,7 +8,14 @@ beforeEach(() => {
     append: vi.fn(),
     cancel: vi.fn(),
     transcript: vi.fn(),
-    context: () => ({ stage: "listening" }),
+    context: () => ({
+      stage: "listening",
+      stageLabel: "고민 듣기",
+      question: "",
+      spread: null,
+      focusSlots: [],
+      revealed: [],
+    }),
     caption: vi.fn(),
     command: vi.fn(async () => ({ ok: true })),
     error: vi.fn(),
@@ -39,6 +46,11 @@ test("only Live captions feed Typecast; duplicate events and punctuation-only ch
   await vi.advanceTimersByTimeAsync(800);
   expect(c.transcript).toHaveBeenCalledWith("assistant", "공주야..", {
     stage: "listening",
+    stageLabel: "고민 듣기",
+    question: "",
+    spread: null,
+    focusSlots: [],
+    revealed: [],
   });
 });
 test("word fragments are joined, remaining unpunctuated tail eventually speaks", async () => {
@@ -46,7 +58,9 @@ test("word fragments are joined, remaining unpunctuated tail eventually speaks",
   await vi.advanceTimersByTimeAsync(250);
   expect(c.append).not.toHaveBeenCalled();
   b.event({ type: "session.output_transcript.delta", delta: "야" });
-  await vi.advanceTimersByTimeAsync(550);
+  await vi.advanceTimersByTimeAsync(1799);
+  expect(c.append).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
   expect(c.append).toHaveBeenCalledExactlyOnceWith("공주야", true);
 });
 test("interruption cancels playback and pending text; late old captions are dropped", async () => {
@@ -177,4 +191,51 @@ test("screen actions wait for outstanding tool results; Korean context fits the 
     item: { type: "function_call_output", call_id: "c", output: '{"ok":true}' },
   });
   expect(c.send).toHaveBeenLastCalledWith({ type: "response.create" });
+});
+
+test("captions wait for playback and interrupted queued captions never appear", () => {
+  b.event({ type: "session.output_transcript.delta", delta: "첫 문장." });
+  b.event({ type: "session.output_transcript.delta", delta: " 다음 문장." });
+  expect(c.caption).not.toHaveBeenCalled();
+  b.playbackStarted();
+  expect(c.caption).toHaveBeenLastCalledWith("첫 문장.");
+  b.interrupt();
+  b.playbackStarted();
+  expect(c.caption).toHaveBeenLastCalledWith("");
+  b.event({ type: "session.output_transcript.delta", delta: "새 답." });
+  b.playbackStarted();
+  expect(c.caption).toHaveBeenLastCalledWith("새 답.");
+});
+
+test("slow streamed syllables stay together until a sentence ends", async () => {
+  for (const delta of ["공주야 오늘은 ", "네 마음", "부터 챙", "겨봐"]) {
+    b.event({ type: "session.output_transcript.delta", delta });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(c.append).not.toHaveBeenCalled();
+  }
+  b.event({
+    type: "session.output_transcript.delta",
+    delta: ". 다음 문장이야! 마지막 말",
+  });
+  expect(c.append).toHaveBeenNthCalledWith(
+    1,
+    "공주야 오늘은 네 마음부터 챙겨봐.",
+    true,
+  );
+  expect(c.append).toHaveBeenNthCalledWith(2, " 다음 문장이야!", true);
+  expect(c.append).toHaveBeenCalledTimes(2);
+  b.interrupt();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(c.append).toHaveBeenCalledTimes(2);
+});
+
+test("waiting for card feedback does not restart delegated responses", async () => {
+  vi.mocked(c.command).mockResolvedValue({ awaitingUser: true });
+  b.event({type:"response.event", delegation_id:"feedback", event:{type:"response.created", response:{id:"wait"}}});
+  b.event({type:"response.event", delegation_id:"feedback", event:{type:"response.output_item.done", item:{type:"function_call",call_id:"next",name:"reveal_card",arguments:'{"slot":2}'}}});
+  b.event({type:"response.event", delegation_id:"feedback", event:{type:"response.completed",response:{id:"wait"}}});
+  await vi.waitFor(() => expect(c.command).toHaveBeenCalledOnce());
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(c.send).toHaveBeenCalledOnce();
+  expect(c.send).not.toHaveBeenCalledWith({type:"response.create"});
 });

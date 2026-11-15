@@ -14,7 +14,7 @@ test('starts at sentence boundary and forwards PCM before HTTP completes, strips
  streams[0].enqueue(wav().subarray(0,20));streams[0].enqueue(Buffer.concat([wav().subarray(20),Buffer.from([0,64])]));await settle();
  assert.equal(s.received[0].sampleRate,32000);assert.equal(s.received.at(-1).type,'audio');assert.ok(!s.received.some(x=>x.type==='done'));
  s.send({type:'text',id:'speech-1',text:'괜찮아. ',flush:true});streams[0].close();await settle();
- assert.equal(requests.length,2);assert.equal(requests[0].body.prompt.emotion_type,'smart');assert.equal(requests[1].body.prompt.emotion_type,'smart');assert.match(requests[1].body.prompt.previous_text,/네 얘기/);assert.equal(requests[1].body.output.audio_tempo,1.2);
+ assert.equal(requests.length,2);assert.equal(requests[0].body.prompt.emotion_type,'smart');assert.equal(requests[1].body.prompt.emotion_type,'smart');assert.match(requests[1].body.prompt.previous_text,/네 얘기/);assert.equal(requests[1].body.output.audio_tempo,1.3);
  streams[1].enqueue(Buffer.concat([wav(),Buffer.from([0,64])]));streams[1].close();await settle();assert.equal(s.received.at(-1).type,'done');assert.ok(!JSON.stringify(s.received).includes('private-key'));
 });
 test('interruption aborts HTTP, discards queued speech and ignores late audio',async t=>{
@@ -24,3 +24,17 @@ test('interruption aborts HTTP, discards queued speech and ignores late audio',a
  stream.enqueue(Buffer.concat([wav(),Buffer.from([0,64])]));await settle();assert.deepEqual(s.received.map(x=>x.type),['ready']);
 });
 test('provider errors surface without forwarding secrets',async t=>{const s=setup(async()=>new Response('private-key',{status:401}));t.after(()=>s.client.close());s.send({type:'text',id:'speech-1',text:'안녕.',flush:true});await settle();assert.equal(s.received.at(-1).type,'error');assert.match(s.received.at(-1).message,/401/);assert.ok(!JSON.stringify(s.received).includes('private-key'));});
+
+test('a multi-sentence reading can queue more than four contexts without losing speech',async t=>{
+ const streams=[],requests=[];
+ const s=setup(async(_,options)=>{requests.push(JSON.parse(options.body));return new Response(new ReadableStream({start(c){streams.push(c)}}));});
+ t.after(()=>s.client.close());
+ for(let i=1;i<=6;i++)s.send({type:'text',id:`speech-${i}`,text:`카드 설명 ${i}.`,flush:true});
+ await settle();
+ for(let i=0;i<6;i++){
+  assert.equal(requests[i].text,`카드 설명 ${i+1}.`);
+  streams[i].enqueue(Buffer.concat([wav(),Buffer.from([0,64]) ]));streams[i].close();await settle();
+ }
+ assert.equal(s.received.filter(x=>x.type==='done').length,6);
+ assert.ok(!s.received.some(x=>x.type==='error'));
+});

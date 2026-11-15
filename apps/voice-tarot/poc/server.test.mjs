@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -44,7 +45,7 @@ test('server keeps keys private, requests text-only Realtime, and requires TTS c
   assert.equal((await fetch(base+'/card-knowledge.mjs')).status,404);
   const session=await fetch(base+'/session',{method:'POST'});
   assert.deepEqual(await session.json(),{value:'ephemeral-only'});
-  assert.deepEqual(calls[0].body.session.output_modalities,['text']);
+  assert.deepEqual(calls[0].body.session.output_modalities,['text']);assert.ok(calls[0].body.session.instructions.includes(readFileSync(new URL('../soul.md',import.meta.url),'utf8').trim()));
   delete process.env.ELEVENLABS_VOICE_ID;
   assert.equal((await fetch(base+'/session',{method:'POST'})).status,503);
   assert.equal(calls.length,1);

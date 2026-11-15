@@ -24,10 +24,10 @@ export function App() {
             }
           >
             <Routes>
-              <Route path="/" element={<Home />} />
+              <Route path="/" element={<Home key="realtime" />} />
               <Route
                 path="/live-lab"
-                element={<Home voiceEngine="live-typecast" />}
+                element={<Home key="live-typecast" voiceEngine="live-typecast" />}
               />
               <Route path="/screens" element={<Screens />} />
               <Route path="/login" element={<Login />} />

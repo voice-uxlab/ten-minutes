@@ -1,4 +1,4 @@
-import {handleLive} from '../server/live.mjs';
+import {handleLive} from './live.mjs';
 import {defaults,applyVoiceSettings} from './voice-settings.mjs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

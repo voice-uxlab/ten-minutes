@@ -1,10 +1,18 @@
+import { TestLogger } from "./test-logger";
+import type { NoteContext } from "./domain";
+import {
+  loadSpeakingPace,
+  saveSpeakingPace,
+  validSpeakingPace,
+  speakingPaceInstruction,
+} from "./speaking-pace";
 import { LiveBridge, type LiveEvent } from "./live-bridge";
 import { watchMicrophone } from "./microphone-activity";
 import { takeAudio } from "./audio-context";
 import { request, readingRequest, queryClient } from "@/api/client";
 import { type Session, type Report, type ReadingResult } from "@/api/types";
 import { profile, saveProfile, saveSession } from "@/lib/storage";
-import { SpeechPlayer, displaySpeech } from "../../../poc/speech.mjs";
+import { SpeechPlayer, displaySpeech } from "./speech.ts";
 import {
   appendNote,
   recordFlow,
@@ -39,9 +47,14 @@ export interface View {
   bgm: boolean;
   remaining: number;
   recording?: string;
+  testLogPath?: string;
+  testLogError?: string;
   busy: boolean;
   active: number[];
   transcriptToAudioMs?: number;
+  audioPlaying?: boolean;
+  speakingPace: number;
+  paceMessage: string;
 }
 type ToolCall = {
   type: string;
@@ -80,7 +93,36 @@ export class Consultation {
   private stream?: MediaStream;
   private audio?: AudioContext;
   private speech?: SpeechPlayer;
+  private readingPlaybackSlot = 0;
+  private readingFeedback = new Set<number>();
+  private async waitForReadingPlayback(slot: number): Promise<ReadingResult | null> {
+    if (!this.speech || this.view.session.demo) return null;
+    const generation = this.generation;
+    const deadline = Date.now() + 45000;
+    // A slow TTS response is pending work, not a failed model tool call.
+    // Keep this tool open so no new response/preamble can refill the queue.
+    if (this.speech.busy || this.live?.hasPendingSpeech)
+      this.testLogger.log("tool.playback_wait", { slot });
+    while (this.speech.busy || this.live?.hasPendingSpeech) {
+      if (this.stopped || this.interrupted || generation !== this.generation)
+        return { error: "사용자 발화나 통화 종료로 진행을 멈췄어." };
+      if (this.speech.closed || Date.now() >= deadline)
+        return { error: "음성 재생을 완료하지 못했어. 자동 재시도하지 말고 사용자 입력을 기다려." };
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    if (this.stopped || this.interrupted || generation !== this.generation)
+      return { error: "사용자 발화나 통화 종료로 진행을 멈췄어." };
+    if (this.readingFeedback.has(slot)) return null;
+    if (this.readingPlaybackSlot !== slot)
+      return { error: `${slot}번 카드의 해석을 먼저 말해. 진행 안내가 아니라 실제 카드 해석이 필요해.` };
+    return { awaitingUser: true, note: "카드 해석에 대한 사용자 이야기를 기다려. 다음 카드 공개나 자동 재시도는 하지 마." };
+  }
+
+  private nativeOutput?: HTMLAudioElement;
+  private stopNativeActivity?: () => void;
+  private nativeSpeaking = false;
   private recorder?: MediaRecorder;
+  private testLogger: TestLogger;
   private timer?: ReturnType<typeof setInterval>;
   private connectTimer?: ReturnType<typeof setTimeout>;
   private selectionTimer?: ReturnType<typeof setTimeout>;
@@ -90,14 +132,15 @@ export class Consultation {
   private handling = false;
   private interrupted = false;
   private responseId = "";
-  private responseContext: unknown;
+  private responseContext?: NoteContext;
   private caption = "";
+  private realtimeSpeechBuffer = "";
   private stopped = false;
   private expiredAt = 0;
   private warned = false;
   private generation = 0;
-  private inputContexts = new Map<string, unknown>();
-  private latestInput: unknown;
+  private inputContexts = new Map<string, NoteContext>();
+  private latestInput?: NoteContext;
   private events = new Set<string>();
   private responses = new Set<string>();
   private completed = new Set<string>();
@@ -108,6 +151,12 @@ export class Consultation {
   private demoStep = -1;
   private wake?: WakeLockSentinel;
   constructor(session: Session) {
+    this.testLogger = new TestLogger(session, (path, error) =>
+      this.update({
+        testLogPath: path || this.view.testLogPath,
+        testLogError: error,
+      }),
+    );
     this.view = {
       session: structuredClone(session),
       phase: session.ended ? "ended" : "idle",
@@ -121,7 +170,33 @@ export class Consultation {
       remaining: 0,
       busy: false,
       active: [],
+      speakingPace: loadSpeakingPace(),
+      paceMessage: "",
     };
+  }
+  setSpeakingPace(value: number) {
+    if (
+      !validSpeakingPace(value) ||
+      this.view.session.voiceEngine !== "live-noeul"
+    )
+      return;
+    if (this.stopped || this.dc?.readyState !== "open") {
+      this.update({ paceMessage: "통화 연결 후 조절할 수 있어요." });
+      return;
+    }
+    const sent = this.send({
+      type: "session.instructions.append",
+      event_id: `pace_${Date.now()}`,
+      delegation_id: null,
+      content: speakingPaceInstruction(value),
+    });
+    if (sent) {
+      saveSpeakingPace(value);
+      this.update({
+        speakingPace: value,
+        paceMessage: `${value.toFixed(2)}배 목표를 전송했어요. 이후 발화에 점차 반영돼요.`,
+      });
+    }
   }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -146,7 +221,7 @@ export class Consultation {
       phase,
       heading,
       hint,
-      ...(caption === undefined ? {} : { caption }),
+      ...(caption === undefined || !this.view.session.demo ? {} : { caption }),
     });
   }
   private send(event: unknown) {
@@ -200,7 +275,8 @@ export class Consultation {
         });
         if (this.stopped) return { error: "종료된 통화예요." };
         Object.assign(this.view.session, data.state);
-        if (!data.result.error) recordFlow(this.view.session, action, args);
+        if (!data.result.error && !data.result.unchanged)
+          recordFlow(this.view.session, action, args);
         queryClient.setQueryData(["reading", data.id], data);
         this.persist();
         this.update();
@@ -248,8 +324,20 @@ export class Consultation {
       return { ok: true };
     }
     if (name === "extend_call") return this.extend();
+    this.testLogger.log("tool.request", { name, args });
+    const previousSlot = name === "reveal_card" && Number(args.slot) > 1
+      ? Number(args.slot) - 1
+      : name === "show_reading" && args.slot === 0 ? 3 : 0;
+    if (previousSlot) {
+      const blocked = await this.waitForReadingPlayback(previousSlot);
+      if (blocked) {
+        this.testLogger.log("tool.result", { name, result: blocked });
+        return blocked;
+      }
+    }
     const r = await this.action(name, args);
-    if (r.error) return r;
+    this.testLogger.log("tool.result", { name, result: r });
+    if (r.error || r.unchanged) return r;
     const s = this.view.session;
     switch (name) {
       case "review_question":
@@ -342,6 +430,9 @@ export class Consultation {
     return this.interact("review_question", { question, spreadId });
   }
   private failMessage(e: unknown) {
+    this.testLogger.log("error", {
+      message: e instanceof Error ? e.message : String(e),
+    });
     this.update({
       error:
         e instanceof Error
@@ -353,6 +444,12 @@ export class Consultation {
     if (!["idle", "error"].includes(this.view.phase) || this.view.session.ended)
       return;
     const s = this.view.session;
+    this.testLogger.log("call.start", {
+      record,
+      question: s.question,
+      cards: s.cards,
+      notes: s.notes,
+    });
     if (s.connected && s.endAt && s.endAt <= Date.now()) {
       await this.end();
       return;
@@ -399,38 +496,94 @@ export class Consultation {
         return;
       }
       this.stream = stream;
-      const live = s.voiceEngine === "live-typecast";
+      const native = s.voiceEngine === "live-noeul";
+      const live = native || s.voiceEngine === "live-typecast";
       const token = live
         ? null
-        : await request<{ value: string }>("/session", {});
+        : await request<{ value: string }>("/session", { id: s.readingId });
       if (stale()) return;
       this.pc = new RTCPeerConnection();
       stream.getTracks().forEach((t) => this.pc!.addTrack(t, stream));
-      this.speech = new SpeechPlayer(this.audio, {
-        destination: this.audio.destination,
-        onState: (busy: boolean) => {
-          if (!this.stopped)
-            this.update({
-              status: busy
-                ? "레나가 말하는 중"
-                : this.responding
+      if (native)
+        this.pc.ontrack = (event) => {
+          if (stale() || event.track.kind !== "audio") return;
+          this.nativeOutput?.pause();
+          this.stopNativeActivity?.();
+          const remote = new MediaStream([event.track]);
+          this.nativeOutput = new Audio();
+          this.nativeOutput.autoplay = true;
+          this.nativeOutput.setAttribute("playsinline", "");
+          this.nativeOutput.srcObject = remote;
+          void this.nativeOutput.play().catch(() => {
+            if (!stale())
+              this.failMessage(
+                Error("음성 재생이 차단됐어요. 다시 연결해 주세요."),
+              );
+          });
+          this.stopNativeActivity = watchMicrophone(
+            this.audio!,
+            remote,
+            (active) => {
+              this.nativeSpeaking = active;
+              if (!this.stopped)
+                this.update({
+                  status: active ? "레나가 말하는 중" : "공주 얘기 듣는 중",
+                });
+            },
+          );
+        };
+      if (!native) {
+        this.speech = new SpeechPlayer(this.audio, {
+          destination: this.audio.destination,
+          onState: (busy: boolean) => {
+            if (!this.stopped)
+              this.update({
+                audioPlaying: busy ? this.view.audioPlaying : false,
+                status: busy
                   ? "레나가 생각하는 중"
-                  : "공주 얘기 듣는 중",
-            });
-        },
-        onError: (error: Error) => this.failMessage(error),
-        onFirstAudio: () => this.live?.firstAudio(),
-      });
-      await this.speech.connect();
+                  : this.responding
+                    ? "레나가 생각하는 중"
+                    : "공주 얘기 듣는 중",
+              });
+          },
+          onError: (error: Error) => this.failMessage(error),
+          onFirstAudio: () => this.live?.firstAudio(),
+          onPlaybackStart: (text: string) => {
+            this.testLogger.log("speech.playback", { text });
+            if (this.view.phase === "reading" && this.view.active.length === 1)
+              this.readingPlaybackSlot = this.view.active[0];
+            if (this.stopped) return;
+            if (this.live) this.live.playbackStarted();
+            else
+              this.update({
+                caption: (this.view.caption + displaySpeech(text)).slice(-600),
+              });
+            this.update({ audioPlaying: true, status: "레나가 말하는 중" });
+          },
+        });
+        await this.speech.connect();
+      }
       if (stale()) return;
       this.dc = this.pc.createDataChannel("oai-events");
       if (live)
         this.live = new LiveBridge({
+          nativeAudio: native,
+          waiting: () => {
+            if (!this.stopped && !this.view.audioPlaying)
+              this.update({ status: "레나가 생각하는 중" });
+          },
           send: (e) => {
             this.send(e);
           },
-          append: (text, flush) => this.speech?.append(text, flush),
-          cancel: () => this.speech?.cancel(),
+          append: (text, flush) => {
+            this.testLogger.log("speech.request", { text });
+            this.speech?.append(text, flush);
+          },
+          cancel: () => {
+            this.readingPlaybackSlot = 0;
+            this.testLogger.log("speech.cancel");
+            this.speech?.cancel();
+          },
           caption: (text) => {
             if (!this.stopped) this.update({ caption: text });
           },
@@ -439,6 +592,7 @@ export class Consultation {
               ? this.latestInput || noteContext(s)
               : noteContext(s),
           transcript: (speaker, text, context) => {
+            this.testLogger.log("transcript", { speaker, text, context });
             s.transcript.push(
               (speaker === "user" ? "공주: " : "레나: ") + text,
             );
@@ -448,6 +602,7 @@ export class Consultation {
           command: (name, args) => this.command(name, args),
           error: (message) => this.failMessage(Error(message)),
           metric: (ms) => {
+            this.testLogger.log("speech.latency", { ms });
             this.update({ transcriptToAudioMs: ms });
             console.info("live_transcript_to_typecast_audio_ms", ms);
           },
@@ -455,6 +610,24 @@ export class Consultation {
       this.dc.onmessage = (m) => {
         try {
           const event = JSON.parse(m.data);
+          if (!String(event.type).endsWith(".delta"))
+            this.testLogger.log("transport.event", {
+              type: event.type,
+              eventId: event.event_id,
+              responseId: event.response_id || event.response?.id,
+              delegatedType: event.event?.type,
+              callId: event.event?.item?.call_id,
+              tool: event.event?.item?.name,
+              error: event.error?.code,
+              calls: event.response?.output
+                ?.filter(
+                  (item: { type: string }) => item.type === "function_call",
+                )
+                .map((item: { call_id: string; name: string }) => ({
+                  id: item.call_id,
+                  name: item.name,
+                })),
+            });
           if (live) {
             if (event.type === "session.started") this.liveReady?.();
             this.live?.event(event as LiveEvent);
@@ -484,6 +657,8 @@ export class Consultation {
           "/live-session",
           {
             id: s.readingId,
+            voiceEngine: s.voiceEngine,
+            speakingPace: this.view.speakingPace,
             sdp: this.pc.localDescription!.sdp,
             history: s.transcript.slice(-16).map((t) => t.slice(-350)),
           },
@@ -525,9 +700,11 @@ export class Consultation {
       if (live)
         this.stopMicActivity = watchMicrophone(this.audio, stream, (active) => {
           if (active) this.latestInput = noteContext(s);
-          this.live?.userSpeaking(active);
+          if (active && this.readingPlaybackSlot) this.readingFeedback.add(this.readingPlaybackSlot);
+          if (!native) this.live?.userSpeaking(active);
         });
       this.restore();
+      if (native) this.update({ status: "공주 얘기 듣는 중" });
       this.persist();
       this.startRecording(record);
       this.setMusic(this.view.bgm);
@@ -567,7 +744,9 @@ export class Consultation {
             summaryVisited: s.summaryVisited,
             transcript: s.transcript.slice(-8),
           })
-        : openingCue;
+        : s.personaId === "test-friend" || s.personaId === "cool-unnie"
+          ? "첫 연결이다. 선택된 페르소나로 자연스럽게 인사하고 아직 사연을 말하지 않았으면 고민을 물어봐. 설정이나 연결 상태를 읽지 않는다."
+          : openingCue;
       if (this.live) this.live.note(cue, false);
       else this.note(cue);
     } catch (e) {
@@ -613,6 +792,7 @@ export class Consultation {
       this.responses.add(r.id);
       this.responseContext = noteContext(s);
       this.caption = "";
+      this.realtimeSpeechBuffer = "";
       this.responseId = r.id;
       this.responding = true;
       this.interrupted = false;
@@ -622,20 +802,45 @@ export class Consultation {
       e.response_id === this.responseId && !this.interrupted && !this.stopped;
     if (e.type === "response.output_text.delta" && current) {
       this.caption += e.delta || "";
-      this.update({ caption: displaySpeech(this.caption) });
-      this.speech?.append(e.delta || "");
+      this.realtimeSpeechBuffer += e.delta || "";
+      let boundary: RegExpMatchArray | null;
+      while (
+        (boundary = this.realtimeSpeechBuffer.match(
+          /[.!?。！？]+(?:[”’"'])?(?=\s|$)/,
+        ))
+      ) {
+        const end = boundary.index! + boundary[0].length;
+        const sentence = this.realtimeSpeechBuffer.slice(0, end);
+        this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(end);
+        if (/[\p{L}\p{N}]/u.test(sentence)) {
+          this.testLogger.log("speech.request", { text: sentence });
+          this.speech?.append(sentence, true);
+        }
+      }
     }
     if (e.type === "response.output_text.done" && current) {
+      this.testLogger.log("transcript", {
+        speaker: "assistant",
+        text: e.text,
+        responseId: e.response_id,
+      });
       const text = displaySpeech(e.text || "");
       s.transcript.push("레나: " + text);
       appendNote(s, "assistant", text, this.responseContext);
-      this.speech?.append("", true);
+      if (/[\p{L}\p{N}]/u.test(this.realtimeSpeechBuffer))
+        this.speech?.append(this.realtimeSpeechBuffer, true);
+      this.realtimeSpeechBuffer = "";
       this.persist();
     }
     if (
       e.type === "conversation.item.input_audio_transcription.completed" &&
       e.transcript
     ) {
+      this.testLogger.log("transcript", {
+        speaker: "user",
+        text: e.transcript,
+        itemId: e.item_id,
+      });
       s.transcript.push("공주: " + e.transcript);
       appendNote(
         s,
@@ -649,9 +854,15 @@ export class Consultation {
       this.persist();
     }
     if (e.type === "input_audio_buffer.speech_started" && !this.stopped) {
+      this.testLogger.log("speech.interrupted", {
+        responseId: this.responseId,
+      });
       this.latestInput = noteContext(s);
       if (e.item_id) this.inputContexts.set(e.item_id, this.latestInput);
       this.interrupted = true;
+      if (this.readingPlaybackSlot) this.readingFeedback.add(this.readingPlaybackSlot);
+      this.readingPlaybackSlot = 0;
+      this.realtimeSpeechBuffer = "";
       this.speech?.cancel();
       this.pending = false;
       if (this.responding) this.send({ type: "response.cancel" });
@@ -692,6 +903,7 @@ export class Consultation {
         return;
       }
       let used = false;
+      let awaitingUser = false;
       this.handling = true;
       try {
         for (const item of r.output || []) {
@@ -710,6 +922,7 @@ export class Consultation {
           } catch {
             result = { error: "작업 실패. 다시 시도해." };
           }
+          awaitingUser ||= result.awaitingUser === true;
           this.send({
             type: "conversation.item.create",
             item: {
@@ -725,6 +938,7 @@ export class Consultation {
       if (
         !this.stopped &&
         r.id === this.responseId &&
+        !awaitingUser &&
         ((!this.interrupted && used) || this.pending)
       ) {
         this.pending = false;
@@ -767,20 +981,13 @@ export class Consultation {
         count = s.cards.length;
       let caption = "";
       if (n < count) {
-        const r = await this.command("reveal_card", { slot: n + 1 });
-        if (r.error) throw Error(r.error);
-        caption = `${r.name} 카드가 나왔어. 자리의 질문과 함께 읽어볼게.`;
-      } else if (n < count + (s.plan?.groups.length || 0)) {
-        const slots = s.plan!.groups[n - count],
-          r = await this.command("show_reading", { slots });
-        caption = (r.context?.cards || [])
-          .filter((c) => slots.includes(c.slot))
-          .map(
-            (c) =>
-              `${c.position}: ${c.keywords}. ${c.knowledge?.reflection || ""}`,
-          )
-          .join("\n");
-      } else if (n === count + (s.plan?.groups.length || 0)) {
+        const slot = n + 1;
+        const revealed = await this.command("reveal_card", { slot });
+        if (revealed.error) throw Error(revealed.error);
+        const r = await this.command("show_reading", { slot });
+        const card = r.context?.cards[0];
+        caption = card ? `${card.position}, ${card.name} 카드야. ${card.keywords}.` : "";
+      } else if (n === count) {
         await this.command("show_reading", { slot: 0 });
         caption =
           "시범 통화는 카드 지식과 배치를 보여주는 예시야. 실제 통화에서는 네 상황과 카드 사이의 관계를 함께 읽어줄게.";
@@ -861,7 +1068,7 @@ export class Consultation {
         t.enabled = false;
       });
       if (
-        (!this.responding && !this.speech?.busy) ||
+        (!this.responding && !this.speech?.busy && !this.nativeSpeaking) ||
         Date.now() - this.expiredAt >= 30000
       )
         void this.end();
@@ -877,11 +1084,9 @@ export class Consultation {
       };
       this.recorder.onstop = () => {
         if (this.view.recording) URL.revokeObjectURL(this.view.recording);
-        this.update({
-          recording: URL.createObjectURL(
-            new Blob(chunks, { type: this.recorder?.mimeType }),
-          ),
-        });
+        const blob = new Blob(chunks, { type: this.recorder?.mimeType });
+        this.update({ recording: URL.createObjectURL(blob) });
+        void this.testLogger.recording(blob);
       };
       this.recorder.start();
     } catch {
@@ -911,7 +1116,9 @@ export class Consultation {
   }
   async end() {
     if (["ending", "ended"].includes(this.view.phase)) return;
+    this.testLogger.log("call.ending");
     this.update({ phase: "ending" });
+    this.nativeOutput?.pause();
     this.stopped = true;
     if (this.live) await this.live.close();
     finishNotes(this.view.session);
@@ -988,13 +1195,26 @@ export class Consultation {
           }
         : base;
     this.persist();
+    this.testLogger.log("call.ended", {
+      report: this.view.session.report,
+      notes: this.view.session.notes,
+    });
+    await this.testLogger.flush();
     this.update({
       phase: "ended",
       caption: this.view.session.report.queen_line,
     });
   }
   private stopTransport() {
+    this.readingPlaybackSlot = 0;
     this.stopped = true;
+    this.nativeOutput?.pause();
+    if (this.nativeOutput) this.nativeOutput.srcObject = null;
+    this.nativeOutput = undefined;
+    this.stopNativeActivity?.();
+    this.stopNativeActivity = undefined;
+    this.nativeSpeaking = false;
+    if (this.pc) this.pc.ontrack = null;
     this.stopMicActivity?.();
     this.stopMicActivity = undefined;
     this.live?.dispose();
@@ -1019,6 +1239,8 @@ export class Consultation {
     this.handling = false;
   }
   dispose() {
+    this.testLogger.log("call.disposed", { notes: this.view.session.notes });
+    void this.testLogger.flush();
     this.persist();
     this.stopTransport();
     if (this.view.recording) URL.revokeObjectURL(this.view.recording);

@@ -925,3 +925,11 @@ select:focus-visible {
   overflow-wrap: anywhere;
   margin-top: 6px;
 }
+
+.voice-waiting { display:flex; align-items:center; justify-content:center; gap:12px; min-height:64px; color:#b8a4d5; }
+.voice-waiting-dots { display:flex; gap:5px; }
+.voice-waiting-dots i { width:7px; height:7px; border-radius:50%; background:currentColor; animation:voice-waiting-pulse 1.2s ease-in-out infinite; }
+.voice-waiting-dots i:nth-child(2) { animation-delay:.15s; }
+.voice-waiting-dots i:nth-child(3) { animation-delay:.3s; }
+@keyframes voice-waiting-pulse { 0%,80%,100% { opacity:.35; transform:translateY(0); } 40% { opacity:1; transform:translateY(-5px); } }
+@media (prefers-reduced-motion:reduce) { .voice-waiting-dots i { animation:none; } }

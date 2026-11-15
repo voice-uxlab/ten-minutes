@@ -1,3 +1,4 @@
+import type { NoteContext } from "./domain";
 import type { ReadingResult } from "@/api/types";
 type FunctionItem = {
   type: string;
@@ -21,14 +22,16 @@ export interface LiveEvent {
   error?: { code?: string };
 }
 export interface LiveCallbacks {
+  nativeAudio?: boolean;
+  waiting?: () => void;
   send: (event: unknown) => void;
   append: (text: string, flush?: boolean) => void;
   cancel: () => void;
-  context: (speaker: "user" | "assistant") => unknown;
+  context: (speaker: "user" | "assistant") => NoteContext;
   transcript: (
     speaker: "user" | "assistant",
     text: string,
-    context: unknown,
+    context: NoteContext | undefined,
   ) => void;
   caption: (text: string) => void;
   command: (
@@ -53,12 +56,13 @@ export class LiveBridge {
     Record<"user" | "assistant", ReturnType<typeof setTimeout>>
   > = {};
   private text = { user: "", assistant: "" };
-  private contexts: Partial<Record<"user" | "assistant", unknown>> = {};
+  private contexts: Partial<Record<"user" | "assistant", NoteContext>> = {};
   private captionText = "";
   private speechBuffer = "";
   private bufferAt?: number;
   private speechTimer?: ReturnType<typeof setTimeout>;
   private pendingStarts: number[] = [];
+  private pendingCaptions: string[] = [];
   private spokenThrough = -1;
   private userThrough = -1;
   private blockedThrough = -1;
@@ -122,16 +126,23 @@ export class LiveBridge {
       )
         return;
       this.spokenThrough = Math.max(this.spokenThrough, e.end_ms ?? -1);
-      this.captionText = (this.captionText + e.delta).slice(-600);
-      this.callbacks.caption(this.captionText);
+      if (this.callbacks.nativeAudio) {
+        this.captionText = (this.captionText + e.delta).slice(-600);
+        this.callbacks.caption(this.captionText);
+      } else this.callbacks.waiting?.();
       if (!this.speechBuffer) this.bufferAt = this.now();
       this.speechBuffer += e.delta;
-      // Complete sentences can go immediately. Never send a punctuation-only request.
-      const boundary = [
-        ...this.speechBuffer.matchAll(/[.!?。！？](?:[”’"'])?(?=\s|$)/g),
-      ].at(-1);
-      if (boundary) this.speak(boundary.index! + boundary[0].length);
-      if (this.speechBuffer && !this.speechTimer) this.scheduleSpeech();
+      // Send each completed sentence as one TTS context, never a timed word fragment.
+      let boundary: RegExpMatchArray | null;
+      while (
+        (boundary = this.speechBuffer.match(/[.!?。！？]+(?:[”’"'])?(?=\s|$)/))
+      ) {
+        this.speak(boundary.index! + boundary[0].length);
+      }
+      // Live may omit final punctuation. Only release that tail after text goes idle.
+      clearTimeout(this.speechTimer);
+      this.speechTimer = undefined;
+      if (this.speechBuffer.trim()) this.scheduleSpeech();
     }
     if (!this.text[speaker])
       this.contexts[speaker] = this.callbacks.context(speaker);
@@ -139,16 +150,13 @@ export class LiveBridge {
     clearTimeout(this.timers[speaker]);
     this.timers[speaker] = setTimeout(() => this.flushNote(speaker), 800);
   }
+  get hasPendingSpeech() { return !!this.speechBuffer || this.pendingCaptions.length > 0; }
   private scheduleSpeech() {
     this.speechTimer = setTimeout(() => {
       this.speechTimer = undefined;
       if (!this.speechBuffer || this.closed) return;
-      const boundary = this.speechBuffer.lastIndexOf(" ") + 1;
-      if (boundary >= 12) this.speak(boundary);
-      else if (this.now() - (this.bufferAt ?? this.now()) >= 800)
-        this.speak(this.speechBuffer.length);
-      if (this.speechBuffer) this.scheduleSpeech();
-    }, 200);
+      this.speak(this.speechBuffer.length);
+    }, 1800);
   }
   private speak(length: number) {
     const text = this.speechBuffer.slice(0, length),
@@ -157,6 +165,7 @@ export class LiveBridge {
     this.bufferAt = this.speechBuffer ? this.now() : undefined;
     if (!/[\p{L}\p{N}]/u.test(text)) return;
     this.pendingStarts.push(start);
+    this.pendingCaptions.push(text);
     this.callbacks.append(text, true);
   }
   private backend(e: LiveEvent) {
@@ -214,6 +223,7 @@ export class LiveBridge {
     this.tasks = this.tasks
       .catch(() => {})
       .then(async () => {
+        let awaitingUser = false;
         for (const item of batch.items) {
           if (this.closed) return;
           let result: ReadingResult;
@@ -226,6 +236,7 @@ export class LiveBridge {
             result = { error: "함수 처리에 실패했어요." };
           }
           if (this.closed) return;
+          awaitingUser ||= result.awaitingUser === true;
           this.callbacks.send({
             type: "response.item.create",
             item: {
@@ -235,7 +246,7 @@ export class LiveBridge {
             },
           });
         }
-        this.needContinuation = true;
+        this.needContinuation = !awaitingUser;
       })
       .finally(() => {
         this.processing--;
@@ -248,6 +259,13 @@ export class LiveBridge {
     this.text[speaker] = "";
     if (text.trim())
       this.callbacks.transcript(speaker, text, this.contexts[speaker]);
+  }
+  playbackStarted() {
+    if (this.closed) return;
+    const text = this.pendingCaptions.shift();
+    if (text === undefined) return;
+    this.captionText = (this.captionText + text).slice(-600);
+    this.callbacks.caption(this.captionText);
   }
   firstAudio() {
     const start = this.pendingStarts.shift();
@@ -265,9 +283,11 @@ export class LiveBridge {
     this.speechBuffer = "";
     this.bufferAt = undefined;
     this.pendingStarts = [];
+    this.pendingCaptions = [];
     this.callbacks.cancel();
     this.flushNote("assistant");
     this.captionText = "";
+    this.callbacks.caption("");
   }
   userSpeaking(speaking: boolean) {
     if (speaking && !this.speaking) this.interrupt();
