@@ -25,6 +25,10 @@ export function App() {
           >
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route
+                path="/live-lab"
+                element={<Home voiceEngine="live-typecast" />}
+              />
               <Route path="/screens" element={<Screens />} />
               <Route path="/login" element={<Login />} />
               <Route path="/onboarding" element={<Onboarding />} />
@@ -47,6 +51,7 @@ export function App() {
         </main>
         <footer className="work-links">
           <Link to="/screens">화면 목록</Link>
+          <Link to="/live-lab">Live 비교 통화</Link>
           <a href="/voice-lab">목소리 테스트</a>
         </footer>
       </BrowserRouter>

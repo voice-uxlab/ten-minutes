@@ -77,10 +77,34 @@ npm test
 npm run build
 ```
 
-기존 37개 테스트 + React/컨트롤러 테스트. 새 테스트는 StrictMode 하에서 닉네임→데모→부분 선택→공개→리포트, 카드 DOM 유지, 같은 URL 복원, 5장 비교+추가 카드, 중복 함수 호출, 재연결 중복 차감 방지를 확인합니다. 실제 마이크/스피커와 모바일 Safari 음성 통화는 기기에서 별도 확인이 필요합니다.
+Node 테스트 39개 + React/컨트롤러 테스트 11개 (총 50개). 새 테스트는 StrictMode 하에서 닉네임→데모→부분 선택→공개→리포트, 카드 DOM 유지, 같은 URL 복원, 5장 비교+추가 카드, 중복 함수 호출, 재연결 중복 차감 방지를 확인합니다. 실제 마이크/스피커와 모바일 Safari 음성 통화는 기기에서 별도 확인이 필요합니다.
 
 ## 남은 서비스 연동
 
 이용권·결제는 **로컬 데모**입니다. 실결제·서버 원장·회원별 상담 접근 제어·다른 기기에서의 리포트 조회는 아직 구현하지 않았습니다. 상담 ID는 임의 생성된 접근 토큰이며, 서버가 회원 소유권을 검증하는 구조로 바꾸기 전에는 프로덕션 서비스로 공개하지 않습니다. 소셜 로그인 OAuth 코드는 유지했지만 실제 개발자 앱과 콜백 등록이 완료되어야 로그인할 수 있습니다.
 
 개발 참고: [Vite](https://vite.dev/guide/), [Tailwind Vite 설치](https://tailwindcss.com/docs/installation/using-vite), [shadcn Vite 구성](https://ui.shadcn.com/docs/installation/vite).
+
+## GPT-Live 자막 → Typecast 비교 경로
+
+`/live-lab`에서 시작하면 GPT-Live WebRTC로 마이크를 보내고, Live의 `session.output_transcript.delta`만 Typecast로 재합성합니다. Live 원본 음성은 재생하지 않습니다. 기본 `/`의 Realtime 통화는 유지됩니다. 선택한 엔진은 상담 기록에 보관되어 재연결에도 유지됩니다.
+
+서버 `server/live.mjs`가 세션을 생성합니다. `LIVE_MODEL` 기본값은 `gpt-live-1`, 도구를 처리할 `LIVE_BACKEND_MODEL` 기본값은 `gpt-5.6-luna`입니다. Responses 위임의 개별 완료 항목에서 함수를 수집하고, 모든 결과를 반환한 뒤 한 번 이어갑니다. 백엔드 답변 텍스트를 음성으로 중복 재생하지 않습니다. 종료 리포트는 별도 Responses 요청으로 생성하고 실패하면 기존 기록 기반 요약을 사용합니다.
+
+자막을 짧은 단어 조각 그대로 합성하면 발음이 끊기거나 문장부호만 있는 요청이 Typecast에서 거부될 수 있습니다. 문장 끝은 즉시 전달하고, 나머지는 완성된 단어 묶음 또는 약 800ms 대기 후 전달합니다. 로컬 마이크 활동 감지 시 Typecast 큐와 보류 자막을 취소하며, 이전 타임스탬프의 자막을 버립니다. 마이크 활동 감지는 에너지 기반 휴리스틱이라 소음 환경에서는 기기 검증이 필요합니다.
+
+### 지연 실측 (2026-11-15, 한국어 인사)
+
+- 브라우저: 첫 자막 구간 → 첫 Typecast 재생 예약 **1,404ms**. 후속 구간 1,166ms / 481ms.
+- 같은 자막 분할 코드를 사용한 서버 측 프로브: 첫 자막 → 첫 PCM **1,496ms** (분할 대기 807ms + 합성 응답 689ms).
+- 소수의 합성 인사 테스트이며 일반적인 평균/백분위 수치가 아닙니다. 사용자 발화 종료부터 Live 자막까지의 시간, 해석/함수 실행 시간은 별도입니다. 더 빠르거나 더 자연스럽다고 아직 결론내릴 수 없습니다.
+
+```sh
+npm run live:latency
+```
+
+위 프로브는 실제 Live·Typecast API를 호출하며 과금됩니다. 마이크 대신 무음을 보내 인사 자막을 생성합니다. Live 음성을 재생하지 않아도 Live 음성 세션 사용료가 발생하고, Typecast 및 위임 모델 비용도 별도입니다. 자막 기반 재합성에서는 Live가 생각하는 발화 시점과 실제 들리는 음성 시점이 다르므로 네이티브 Live의 동시 대화 경험과 동일하지 않습니다.
+
+검증: Live 세션 생성, 브라우저 Typecast 음성 재생, 실제 위임 함수로 질문 화면 변경, 카드 선택/공개, 종료·리포트, 자막 중복/문장부호 제거/중단/함수 배치 처리 테스트. 실제 사람의 마이크 발화와 모바일 Safari 비교 청취는 별도 확인이 필요합니다.
+
+참고: [Live WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live), [자막 이벤트](https://developers.openai.com/api/docs/guides/live-conversations#display-captions), [위임 함수 처리](https://developers.openai.com/api/docs/guides/live-delegation#return-tool-results-and-approvals).

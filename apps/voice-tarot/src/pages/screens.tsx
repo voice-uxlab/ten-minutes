@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 const rows = [
+  ["Live 비교 통화", "/live-lab", "GPT-Live 자막 → Typecast 출력과 지연 확인"],
   ["로그인", "/login", "네이버·카카오 진입, 닉네임 체험"],
   ["닉네임 설정", "/onboarding", "닉네임과 연령 확인"],
   ["홈", "/", "마이크 권한, 음성 처리·녹음 동의, 상담 시작"],

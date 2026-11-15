@@ -176,7 +176,19 @@ function Call({ initial }: { initial: Session }) {
             : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`}
         </span>
       </header>
-      <span className="mode">{s.demo ? "시범 통화" : "레나와의 통화"}</span>
+      <span className="mode">
+        {s.demo
+          ? "시범 통화"
+          : s.voiceEngine === "live-typecast"
+            ? "Live × Typecast 비교 통화"
+            : "레나와의 통화"}
+      </span>
+      {s.voiceEngine === "live-typecast" &&
+      v.transcriptToAudioMs !== undefined ? (
+        <p className="hint">
+          최근 자막 구간 → 첫 음성 재생: {v.transcriptToAudioMs}ms (최근 구간)
+        </p>
+      ) : null}
       {v.phase !== "reveal" ? <Reader status={v.status} /> : null}
       <h1>{v.heading}</h1>
       <p className="hint">{v.hint}</p>

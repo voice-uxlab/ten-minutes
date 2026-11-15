@@ -98,7 +98,11 @@ export function Onboarding() {
     </section>
   );
 }
-export function Home() {
+export function Home({
+  voiceEngine = "realtime",
+}: {
+  voiceEngine?: "realtime" | "live-typecast";
+}) {
   const navigate = useNavigate(),
     [p, setP] = useState(profile),
     [mic, setMic] = useState(false),
@@ -125,6 +129,7 @@ export function Home() {
         ...data.state,
         readingId: data.id,
         demo,
+        voiceEngine,
         transcript: [],
         notes: [],
         date: new Date().toISOString(),
@@ -169,6 +174,14 @@ export function Home() {
   }
   return (
     <section className="page intro">
+      {voiceEngine === "live-typecast" ? (
+        <Panel title="GPT-Live × Typecast 비교 통화">
+          <p>
+            Live 자막을 Typecast로 읽어줘요. 첫 자막부터 음성 재생까지의 시간을
+            상담 화면에서 확인할 수 있어요.
+          </p>
+        </Panel>
+      ) : null}
       <header>
         <Link to="/login">‹ HOME</Link>
         {auth.data?.user ? (

@@ -1,3 +1,5 @@
+import { LiveBridge, type LiveEvent } from "./live-bridge";
+import { watchMicrophone } from "./microphone-activity";
 import { takeAudio } from "./audio-context";
 import { request, readingRequest, queryClient } from "@/api/client";
 import { type Session, type Report, type ReadingResult } from "@/api/types";
@@ -39,6 +41,7 @@ export interface View {
   recording?: string;
   busy: boolean;
   active: number[];
+  transcriptToAudioMs?: number;
 }
 type ToolCall = {
   type: string;
@@ -69,6 +72,9 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class Consultation {
   private listeners = new Set<() => void>();
   private view: View;
+  private live?: LiveBridge;
+  private stopMicActivity?: () => void;
+  private liveReady?: () => void;
   private pc?: RTCPeerConnection;
   private dc?: RTCDataChannel;
   private stream?: MediaStream;
@@ -160,6 +166,10 @@ export class Consultation {
   }
   note(text: string) {
     if (this.stopped) return;
+    if (this.live) {
+      this.live.note(text);
+      return;
+    }
     if (this.speech?.busy || this.responding) {
       this.speech?.cancel();
       this.interrupted = true;
@@ -389,7 +399,10 @@ export class Consultation {
         return;
       }
       this.stream = stream;
-      const token = await request<{ value: string }>("/session", {});
+      const live = s.voiceEngine === "live-typecast";
+      const token = live
+        ? null
+        : await request<{ value: string }>("/session", {});
       if (stale()) return;
       this.pc = new RTCPeerConnection();
       stream.getTracks().forEach((t) => this.pc!.addTrack(t, stream));
@@ -406,20 +419,55 @@ export class Consultation {
             });
         },
         onError: (error: Error) => this.failMessage(error),
-        onFirstAudio: () => {},
+        onFirstAudio: () => this.live?.firstAudio(),
       });
       await this.speech.connect();
       if (stale()) return;
       this.dc = this.pc.createDataChannel("oai-events");
+      if (live)
+        this.live = new LiveBridge({
+          send: (e) => {
+            this.send(e);
+          },
+          append: (text, flush) => this.speech?.append(text, flush),
+          cancel: () => this.speech?.cancel(),
+          caption: (text) => {
+            if (!this.stopped) this.update({ caption: text });
+          },
+          context: (speaker) =>
+            speaker === "user"
+              ? this.latestInput || noteContext(s)
+              : noteContext(s),
+          transcript: (speaker, text, context) => {
+            s.transcript.push(
+              (speaker === "user" ? "공주: " : "레나: ") + text,
+            );
+            appendNote(s, speaker, text, context);
+            this.persist();
+          },
+          command: (name, args) => this.command(name, args),
+          error: (message) => this.failMessage(Error(message)),
+          metric: (ms) => {
+            this.update({ transcriptToAudioMs: ms });
+            console.info("live_transcript_to_typecast_audio_ms", ms);
+          },
+        });
       this.dc.onmessage = (m) => {
         try {
-          void this.event(JSON.parse(m.data)).catch((e) => this.failMessage(e));
+          const event = JSON.parse(m.data);
+          if (live) {
+            if (event.type === "session.started") this.liveReady?.();
+            this.live?.event(event as LiveEvent);
+          } else void this.event(event).catch((e) => this.failMessage(e));
         } catch {
           this.failMessage(Error("통화 이벤트를 읽지 못했어요."));
         }
       };
       const opened = new Promise<void>((resolve, reject) => {
-        this.dc!.onopen = () => resolve();
+        this.dc!.onopen = () => {
+          if (!live) resolve();
+        };
+        if (live) this.liveReady = () => resolve();
         this.dc!.onerror = () => reject(Error("음성 연결에 실패했어요."));
         this.connectTimer = setTimeout(
           () => reject(Error("연결 시간이 초과됐어요.")),
@@ -429,21 +477,39 @@ export class Consultation {
       void opened.catch(() => {});
       await this.pc.setLocalDescription(await this.pc.createOffer());
       if (stale()) return;
-      const answer = await fetch("https://api.openai.com/v1/realtime/calls", {
-        method: "POST",
-        signal: AbortSignal.timeout(15000),
-        headers: {
-          Authorization: `Bearer ${token.value}`,
-          "Content-Type": "application/sdp",
-        },
-        body: this.pc.localDescription!.sdp,
-      });
-      if (!answer.ok) throw Error("음성 통화 연결에 실패했어요.");
-      if (stale()) return;
-      await this.pc.setRemoteDescription({
-        type: "answer",
-        sdp: await answer.text(),
-      });
+      if (live) {
+        await this.waitForIce();
+        if (stale()) return;
+        const data = await request<{ transport: { sdp: string } }>(
+          "/live-session",
+          {
+            id: s.readingId,
+            sdp: this.pc.localDescription!.sdp,
+            history: s.transcript.slice(-16).map((t) => t.slice(-350)),
+          },
+        );
+        if (stale()) return;
+        await this.pc.setRemoteDescription({
+          type: "answer",
+          sdp: data.transport.sdp,
+        });
+      } else {
+        const answer = await fetch("https://api.openai.com/v1/realtime/calls", {
+          method: "POST",
+          signal: AbortSignal.timeout(15000),
+          headers: {
+            Authorization: `Bearer ${token!.value}`,
+            "Content-Type": "application/sdp",
+          },
+          body: this.pc.localDescription!.sdp,
+        });
+        if (!answer.ok) throw Error("음성 통화 연결에 실패했어요.");
+        if (stale()) return;
+        await this.pc.setRemoteDescription({
+          type: "answer",
+          sdp: await answer.text(),
+        });
+      }
       await opened;
       clearTimeout(this.connectTimer);
       if (stale()) return;
@@ -456,6 +522,11 @@ export class Consultation {
         s.connected = true;
         saveProfile(wallet);
       }
+      if (live)
+        this.stopMicActivity = watchMicrophone(this.audio, stream, (active) => {
+          if (active) this.latestInput = noteContext(s);
+          this.live?.userSpeaking(active);
+        });
       this.restore();
       this.persist();
       this.startRecording(record);
@@ -482,29 +553,48 @@ export class Consultation {
           });
         }
       };
-      this.note(
-        s.question
-          ? "내부 복원 정보다. 복원이나 설정을 이해했다는 말 없이 자연스럽게 이어가. 아직 고르지 않은 번호만 요청하고 기존 카드는 유지해. " +
-              JSON.stringify({
-                question: s.question,
-                questionConfirmed: s.questionConfirmed,
-                picks: s.picks,
-                cards: s.cards.map(cardInfo),
-                revealed: s.revealed,
-                plan: s.plan,
-                clarifier: s.clarifier,
-                readingSlots: s.readingSlots,
-                summaryVisited: s.summaryVisited,
-                transcript: s.transcript.slice(-8),
-              })
-          : openingCue,
-      );
+      const cue = s.question
+        ? "내부 복원 정보다. 복원이나 설정을 이해했다는 말 없이 자연스럽게 이어가. 아직 고르지 않은 번호만 요청하고 기존 카드는 유지해. " +
+          JSON.stringify({
+            question: s.question,
+            questionConfirmed: s.questionConfirmed,
+            picks: s.picks,
+            cards: s.cards.map(cardInfo),
+            revealed: s.revealed,
+            plan: s.plan,
+            clarifier: s.clarifier,
+            readingSlots: s.readingSlots,
+            summaryVisited: s.summaryVisited,
+            transcript: s.transcript.slice(-8),
+          })
+        : openingCue;
+      if (this.live) this.live.note(cue, false);
+      else this.note(cue);
     } catch (e) {
       if (stale()) return;
       this.stopTransport();
       this.update({ phase: "error" });
       this.failMessage(e);
     }
+  }
+  private async waitForIce() {
+    const pc = this.pc!;
+    if (pc.iceGatheringState === "complete") return;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pc.removeEventListener("icegatheringstatechange", check);
+        reject(Error("음성 연결 경로를 찾지 못했어요."));
+      }, 8000);
+      const check = () => {
+        if (pc.iceGatheringState === "complete") {
+          clearTimeout(timeout);
+          pc.removeEventListener("icegatheringstatechange", check);
+          resolve();
+        }
+      };
+      pc.addEventListener("icegatheringstatechange", check);
+      check();
+    });
   }
   async event(e: RealtimeEvent) {
     if (e.event_id) {
@@ -821,6 +911,9 @@ export class Consultation {
   }
   async end() {
     if (["ending", "ended"].includes(this.view.phase)) return;
+    this.update({ phase: "ending" });
+    this.stopped = true;
+    if (this.live) await this.live.close();
     finishNotes(this.view.session);
     this.stopped = true;
     this.show(
@@ -836,7 +929,21 @@ export class Consultation {
     this.stream?.getTracks().forEach((t) => t.stop());
     clearInterval(this.timer);
     let result: Report | null = null;
-    if (!this.view.session.demo && this.dc?.readyState === "open") {
+    if (this.live) {
+      try {
+        const data = await request<{ report: Report }>("/live-report", {
+          id: this.view.session.readingId,
+          history: this.view.session.transcript
+            .slice(-16)
+            .map((t) => t.slice(-350)),
+        });
+        result = data.report;
+      } catch {
+        this.failMessage(
+          Error("리포트 생성이 지연되어 대화 기록으로 요약했어요."),
+        );
+      }
+    } else if (!this.view.session.demo && this.dc?.readyState === "open") {
       if (this.responding) this.send({ type: "response.cancel" });
       await delay(350);
       const response = new Promise<Report | null>((resolve) => {
@@ -888,6 +995,11 @@ export class Consultation {
   }
   private stopTransport() {
     this.stopped = true;
+    this.stopMicActivity?.();
+    this.stopMicActivity = undefined;
+    this.live?.dispose();
+    this.live = undefined;
+    this.liveReady = undefined;
     this.generation++;
     clearInterval(this.timer);
     clearTimeout(this.connectTimer);

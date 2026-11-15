@@ -52,6 +52,7 @@ export interface Report {
   queen_line: string;
 }
 export interface Session extends Reading {
+  voiceEngine?: "realtime" | "live-typecast";
   readingId: string;
   demo: boolean;
   transcript: string[];

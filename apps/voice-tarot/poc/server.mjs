@@ -1,3 +1,4 @@
+import {handleLive} from '../server/live.mjs';
 import {defaults,applyVoiceSettings} from './voice-settings.mjs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -24,6 +25,7 @@ export const server=createServer(async(req,res)=>{
   if(req.method==='GET'&&path==='/voice-settings') {const tts=ttsConfig();return reply(200,{provider:tts.provider,keyConfigured:!!process.env.TYPECAST_API_KEY,settings:tts.settings||{...defaults,voice:process.env.TYPECAST_VOICE_ID||'',model:process.env.TYPECAST_MODEL||defaults.model}});}
   if(req.method==='POST') {
    if(req.headers.origin && req.headers.origin!==`http://${req.headers.host}` && req.headers.origin!==`https://${req.headers.host}`) return reply(403,{error:'허용되지 않은 요청입니다.'});
+   if(await handleLive(req,res,path,readings))return;
    if(path==='/voice-settings') {
     if(!process.env.TYPECAST_API_KEY)return reply(503,{error:'서버 .env에 TYPECAST_API_KEY를 설정해 주세요.'});
     let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4096)return reply(413,{error:'설정이 너무 커요.'});}
@@ -47,7 +49,7 @@ export const server=createServer(async(req,res)=>{
   // Production SPA assets are restricted to the build directory; never serve env/source files.
   if(process.env.SERVE_REACT==='1'&&req.method==='GET') {
    const asset=/^\/assets\/[a-zA-Z0-9_.-]+$/.test(path);
-   const route=path==='/'||['/login','/onboarding','/tickets','/payments/result','/screens'].includes(path)||/^\/sessions\/[a-f0-9]{48}(?:\/report)?$/.test(path);
+   const route=path==='/'||['/login','/onboarding','/tickets','/payments/result','/screens','/live-lab'].includes(path)||/^\/sessions\/[a-f0-9]{48}(?:\/report)?$/.test(path);
    if(asset||route){try{const file=asset?'.'+path:'./index.html';const data=await readFile(new URL(file,new URL('../dist/',import.meta.url)));const ext=file.split('.').at(-1);res.writeHead(200,{'Content-Type':({js:'text/javascript',css:'text/css',png:'image/png',html:'text/html; charset=utf-8'})[ext]||'application/octet-stream','Cache-Control':asset?'public, max-age=3600':'no-store'});return res.end(data);}catch{return reply(404,{error:'프론트엔드를 먼저 빌드해 주세요.'});}}
   }
   const files={'/screens':'screens.html','/screens.js':'screens.js','/ui.mjs':'ui.mjs','/selection.mjs':'selection.mjs','/spreads.mjs':'spreads.mjs','/conversation-notes.mjs':'conversation-notes.mjs','/voice-lab':'voice-lab.html','/voice-lab.js':'voice-lab.js','/voice-lab.css':'voice-lab.css','/':'index.html','/app.js':'app.js','/style.css':'style.css','/state.mjs':'state.mjs','/speech.mjs':'speech.mjs'};
