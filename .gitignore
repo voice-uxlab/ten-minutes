@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.*
+.reading-sessions/
+.playwright-mcp/
+.DS_Store

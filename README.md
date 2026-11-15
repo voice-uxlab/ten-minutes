@@ -13,3 +13,15 @@ Voice UX Lab 팀원들의 프로젝트 아이디어를 모으는 저장소입니
 3. 작성한 파일을 `main` 브랜치에 직접 커밋하여 업로드합니다.
    - Pull Request(PR)는 생성하지 않습니다.
    - 다른 팀원의 제출 파일을 덮어쓰지 않도록 파일명 중복을 확인합니다.
+
+## 실행 가능한 프론트엔드
+
+홍비님의 `frontend-setup-proposal`을 기준으로 구현한 React 앱은 [`apps/voice-tarot`](apps/voice-tarot/README.md)에 있습니다.
+
+```sh
+cd apps/voice-tarot
+npm ci
+npm run dev
+```
+
+http://localhost:5173 — API 키 없이 시범 통화 가능. Typecast 실제 음성 및 OAuth 설정은 앱 README를 참고하세요. 기존 PoC도 `npm run poc`로 비교 실행할 수 있습니다.

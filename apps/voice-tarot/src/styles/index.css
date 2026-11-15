@@ -1,0 +1,54 @@
+@import "tailwindcss";
+@import "./poc.css";
+@theme {
+  --color-background: #171619;
+  --color-foreground: #f8f4f5;
+  --color-primary: #ffb2ce;
+}
+:root {
+  color-scheme: dark;
+  --background: #171619;
+  --foreground: #f8f4f5;
+  --primary: #ffb2ce;
+}
+body {
+  margin: 0;
+}
+#root {
+  width: 100%;
+}
+h1,
+p {
+  white-space: pre-line;
+}
+button,
+a {
+  touch-action: manipulation;
+}
+.page {
+  min-height: calc(100dvh - 40px);
+}
+.slots:empty {
+  display: none;
+}
+.card {
+  animation: none;
+}
+.error-message {
+  color: #ffc9d5;
+  white-space: pre-line;
+}
+.page header {
+  gap: 12px;
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
