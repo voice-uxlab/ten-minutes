@@ -1,22 +1,17 @@
-# Voice UX Lab — 프로젝트 아이디어 제출
+# Ten Minutes
 
-Voice UX Lab 팀원들의 프로젝트 아이디어를 모으는 저장소입니다.
+실시간 음성으로 고민을 나누고 타로 카드를 선택해 해석을 듣는 AI 타로 상담 서비스입니다.
 
-## 제출 방법
+## 개발 환경
 
-1. 저장소 루트에 `{project-name}.md` 형식으로 Markdown 파일을 생성합니다.
-   - 예: `hands-free-work-log.md`
-   - 파일명은 프로젝트를 알아볼 수 있는 영문 소문자와 하이픈으로 작성합니다.
-2. [TEMPLATE.md](TEMPLATE.md)를 복사하고, 제안자와 프로젝트명을 입력한 뒤 모든 문항의 답변을 직접 작성합니다.
-   - 아직 확인하지 못한 내용은 가정과 추가로 확인할 내용을 구분해 적습니다.
-   - 해당하지 않는 문항은 그 이유를 적습니다.
-3. 작성한 파일을 `main` 브랜치에 직접 커밋하여 업로드합니다.
-   - Pull Request(PR)는 생성하지 않습니다.
-   - 다른 팀원의 제출 파일을 덮어쓰지 않도록 파일명 중복을 확인합니다.
+홍비님의 `frontend-setup-proposal`을 기준으로 구현한 React 앱과 Node.js API는 [`apps/voice-tarot`](apps/voice-tarot/README.md)에 있습니다. Node.js 24 이상과 npm을 사용합니다.
 
-## 실행 가능한 프론트엔드
+- 인증 정보와 API 키는 서버 환경 변수로 관리합니다.
+- 개인용 `.env`, 상담 로그, 녹음 파일은 커밋하지 않습니다.
+- 의존성은 앱의 `package-lock.json`을 기준으로 설치합니다.
+- 백엔드 설계와 API 명세는 [`specs/backend`](specs/backend/README.md)를 참고하세요. 설계 문서의 기능과 현재 테스트 앱의 구현 범위는 다를 수 있습니다.
 
-홍비님의 `frontend-setup-proposal`을 기준으로 구현한 React 앱은 [`apps/voice-tarot`](apps/voice-tarot/README.md)에 있습니다.
+## 실행 방법
 
 ```sh
 cd apps/voice-tarot
@@ -24,4 +19,17 @@ npm ci
 npm run dev
 ```
 
-http://localhost:5173 — API 키 없이 시범 통화 가능. Typecast 실제 음성 및 OAuth 설정은 앱 README를 참고하세요. 기존 PoC도 `npm run poc`로 비교 실행할 수 있습니다.
+http://localhost:5173 — 프론트엔드와 로컬 API 서버가 함께 실행됩니다. API 키 없이 시범 통화를 사용할 수 있습니다. 실제 음성 상담과 OAuth 설정은 앱 README를 참고하세요.
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+기존 JavaScript PoC는 비교용 보관본이며 `npm run poc`로 실행할 수 있습니다. 현재 실행 코드는 앱의 `src/`, `server/`, `shared/`에 있습니다.
+
+## 협업
+
+브랜치와 PR 규칙은 [`docs/git-flow.md`](docs/git-flow.md)를 따릅니다. 작업 브랜치에서 PR을 만들고 `dev`로 병합합니다.
