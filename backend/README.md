@@ -10,6 +10,7 @@ Python 3.9 이상과 `uv`가 필요합니다.
 cd backend
 cp .env.example .env
 uv sync --locked
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -19,13 +20,16 @@ uv run uvicorn app.main:app --reload --port 8000
 
 `pyproject.toml`과 `uv.lock`이 의존성의 기준입니다. `requirements*.txt`는 Vercel과 `uv`를 사용할 수 없는 환경을 위한 호환 파일입니다.
 
-로컬 기본 DB는 SQLite입니다. 배포 시 `DATABASE_URL`을 PostgreSQL URL로 설정합니다. 현재 스키마는 `AUTO_CREATE_SCHEMA=true`일 때 앱 시작 시 생성되므로, 운영 배포 전에 Alembic migration으로 전환해야 합니다.
+로컬과 배포 환경 모두 PostgreSQL만 사용합니다. `DATABASE_URL`에는 psycopg URL을 설정하고,
+스키마와 78장 카드 기준 데이터는 Alembic으로 관리합니다. 새 DB에는 서버를 실행하기 전에
+`uv run alembic upgrade head`를 실행합니다. 앱 시작 시 테이블을 자동 생성하지 않습니다.
 
 OAuth callback의 API origin은 `BACKEND_ORIGIN`, 로그인 후 이동·CORS·공유 링크의 웹
 origin은 `PUBLIC_WEB_ORIGIN`으로 설정합니다. 카드 이미지는 DB의
-`tarot_cards.image_path`에 공개 경로를 저장하고 실제 PNG 파일은 정적 파일 호스팅이나
-오브젝트 스토리지에 두는 구조로 추가할 예정입니다. 이미지 저장소가 연결되기 전까지
-`image_url`과 `thumbnail_image_url`은 `null`입니다.
+`tarot_cards.image_path`에 공개 경로를 저장하고 실제 PNG 파일은 현재 백엔드의
+`app/static/cards`에서 제공합니다. 현재 앞면 이미지는 PoC의 별, 태양, 절제 세 장을
+78장에 반복 매핑한 임시 데이터입니다. 정식 카드 이미지가 준비되면 파일과 seed 경로를
+교체해야 합니다.
 
 OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다. 상담용 호칭은
 `PATCH /api/v1/users/me`에서 사용자가 `CUSTOM`을 선택했을 때만 저장하며, Provider 이메일은

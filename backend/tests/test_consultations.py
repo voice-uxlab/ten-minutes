@@ -79,7 +79,9 @@ def test_report_is_private_and_share_response_contains_only_hook(authenticated_c
     consultation_list = client.get("/api/v1/consultations")
     assert consultation_list.status_code == 200
     assert consultation_list.json()["items"][0]["situation_summary"] == report_payload["situation_summary"]
-    assert consultation_list.json()["items"][0]["thumbnail_image_url"] is None
+    assert consultation_list.json()["items"][0]["thumbnail_image_url"].startswith(
+        "http://localhost:8000/static/cards/"
+    )
 
     shared = client.post(
         f"/api/v1/consultations/{consultation['id']}/share-links",
@@ -187,7 +189,7 @@ def test_oauth_authorize_uses_backend_origin(db_session):
         backend_origin="http://localhost:8000/",
         public_web_origin="http://localhost:5173/",
         kakao_client_id="test-client-id",
-        database_url="sqlite://",
+        database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
         auto_create_schema=False,
     )
     app.dependency_overrides[get_settings] = lambda: settings
@@ -229,3 +231,23 @@ def test_current_user_response_and_custom_nickname(authenticated_client, db_sess
     assert updated.json()["nickname"] == "대장"
     assert updated.json()["onboarding_required"] is False
     assert user.nickname == "대장"
+
+
+def test_tarot_cards_are_seeded_and_images_are_served(authenticated_client, db_session):
+    from sqlalchemy import func, select
+
+    from app.models import TarotCard
+
+    client, _ = authenticated_client
+    assert db_session.scalar(select(func.count()).select_from(TarotCard)) == 78
+
+    consultation = create_consultation(client)
+    select_cards(client, consultation["id"])
+    revealed = client.post(f"/api/v1/consultations/{consultation['id']}/cards/1/reveal")
+    assert revealed.status_code == 200
+    image_url = revealed.json()["card"]["image_url"]
+    assert image_url.startswith("http://localhost:8000/static/cards/")
+
+    image_response = client.get(image_url)
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"] == "image/png"

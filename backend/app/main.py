@@ -1,31 +1,23 @@
-from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .api import public_router, router
 from .auth import router as auth_router
 from .config import get_settings
-from .database import Base, engine
 from .errors import APIError, api_error_handler, validation_error_handler
 
 
 settings = get_settings()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    if settings.auto_create_schema:
-        Base.metadata.create_all(bind=engine)
-    yield
-
-
 app = FastAPI(
     title="Ten Minutes API",
     version="0.1.0",
-    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +28,11 @@ app.add_middleware(
 )
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.mount(
+    "/static/cards",
+    StaticFiles(directory=Path(__file__).parent / "static" / "cards"),
+    name="tarot-card-assets",
+)
 
 
 @app.middleware("http")

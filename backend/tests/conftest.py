@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import ServiceSession, User
+from app.seed_cards import seed_tarot_cards
 
 
 @pytest.fixture
@@ -27,6 +28,7 @@ def db_session():
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     session = session_factory()
+    seed_tarot_cards(session)
 
     def override_db():
         try:
@@ -58,4 +60,3 @@ def authenticated_client(db_session):
     with TestClient(app) as client:
         client.cookies.set(get_settings().session_cookie_name, raw_token)
         yield client, user
-

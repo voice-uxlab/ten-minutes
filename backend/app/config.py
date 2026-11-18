@@ -11,8 +11,7 @@ class Settings(BaseSettings):
     app_env: str = "local"
     backend_origin: str = "http://localhost:8000"
     public_web_origin: str = "http://localhost:5173"
-    database_url: str = "sqlite:///./ten_minutes.db"
-    auto_create_schema: bool = True
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes"
     session_cookie_name: str = "ten_minutes_session"
     session_cookie_secure: bool = False
     session_ttl_days: int = Field(default=14, ge=1, le=90)

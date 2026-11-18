@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, SmallInteger, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -72,6 +73,21 @@ class OAuthAttempt(Base):
     consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class TarotCard(Base):
+    __tablename__ = "tarot_cards"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
+    code: Mapped[str] = mapped_column(String(64), unique=True)
+    name_ko: Mapped[str] = mapped_column(String(64))
+    upright_keywords: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(ARRAY(String()), "postgresql")
+    )
+    reversed_keywords: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(ARRAY(String()), "postgresql")
+    )
+    image_path: Mapped[str] = mapped_column(String(255))
+
+
 class Consultation(Base):
     __tablename__ = "consultation_sessions"
 
@@ -107,11 +123,12 @@ class ConsultationCard(Base):
     slot: Mapped[int] = mapped_column(Integer)
     picked_number: Mapped[int] = mapped_column(Integer)
     position: Mapped[str] = mapped_column(String(80))
-    card_id: Mapped[int] = mapped_column(Integer)
+    card_id: Mapped[int] = mapped_column(ForeignKey("tarot_cards.id"))
     direction: Mapped[str] = mapped_column(String(10))
     revealed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     consultation: Mapped[Consultation] = relationship(back_populates="cards")
+    tarot_card: Mapped[TarotCard] = relationship()
 
 
 class ConsultationReport(Base):

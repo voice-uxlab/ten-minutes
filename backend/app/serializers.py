@@ -1,12 +1,17 @@
 from typing import Optional
 
-from .config import Settings
-from .deck import card_by_id
+from .config import Settings, get_settings
 from .models import Consultation, ConsultationCard, User, ensure_utc
 
 
 def public_origin(settings: Settings) -> str:
     return settings.public_web_origin.rstrip("/")
+
+
+def card_image_url(image_path: str) -> str:
+    if image_path.startswith(("http://", "https://")):
+        return image_path
+    return f"{get_settings().backend_origin.rstrip('/')}/{image_path.lstrip('/')}"
 
 
 def user_response(user: User) -> dict:
@@ -43,15 +48,19 @@ def card_response(
     }
     if not revealed:
         return response
-    definition = card_by_id(card.card_id)
-    keywords = definition.upright if card.direction == "UPRIGHT" else definition.reversed
+    definition = card.tarot_card
+    keywords = (
+        definition.upright_keywords
+        if card.direction == "UPRIGHT"
+        else definition.reversed_keywords
+    )
     response.update(
         {
             "card_id": card.card_id,
-            "card_code": f"card-{card.card_id:02d}",
-            "name": definition.name,
+            "card_code": definition.code,
+            "name": definition.name_ko,
             "direction": card.direction,
-            "image_url": None,
+            "image_url": card_image_url(definition.image_path),
             "keywords": list(keywords),
         }
     )

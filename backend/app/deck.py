@@ -93,3 +93,20 @@ DECK = (
 def card_by_id(card_id: int) -> TarotCard:
     raw = DECK[card_id]
     return TarotCard(*raw)
+
+
+DUMMY_CARD_IMAGE_PATHS = (
+    "/static/cards/star.png",
+    "/static/cards/sun.png",
+    "/static/cards/temperance.png",
+)
+
+
+def dummy_image_path_for(card_id: int) -> str:
+    """Return a temporary front image until the licensed 78-card deck is ready."""
+    known_images = {
+        14: "/static/cards/temperance.png",
+        17: "/static/cards/star.png",
+        19: "/static/cards/sun.png",
+    }
+    return known_images.get(card_id, DUMMY_CARD_IMAGE_PATHS[card_id % len(DUMMY_CARD_IMAGE_PATHS)])

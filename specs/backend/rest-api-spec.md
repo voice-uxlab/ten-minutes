@@ -70,6 +70,7 @@ Pydantic 형식 오류도 이 구조로 변환할지 FastAPI 기본 `detail` 형
 | `card_id` | `int` | 서버 카드 ID |
 | `name` | `str` | 표시 이름 |
 | `direction` | `CardDirection` | `UPRIGHT`, `REVERSED` |
+| `image_url` | `str` | 공개된 카드 이미지의 절대 URL |
 | `keywords` | `list[str]` | 표시, 리딩용 핵심어 |
 | `revealed_at` | `datetime | None` | 공개 전에는 `null` |
 

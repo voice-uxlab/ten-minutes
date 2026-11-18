@@ -108,6 +108,7 @@ erDiagram
         varchar name_ko
         text_array upright_keywords
         text_array reversed_keywords
+        varchar image_path
     }
 
     CONSULTATION_SESSIONS {
@@ -200,8 +201,11 @@ erDiagram
 | `name_ko` | VARCHAR(64) | 필수 | 카드 선택, 리포트 화면에 표시 |
 | `upright_keywords` | TEXT[] | 필수 | 정방향 카드 해석 컨텍스트 |
 | `reversed_keywords` | TEXT[] | 필수 | 역방향 카드 해석 컨텍스트 |
+| `image_path` | VARCHAR(255) | 필수 | 공개 카드 이미지의 정적 경로. 호스트 주소는 저장하지 않고 API 응답에서 조합 |
 
-MVP는 PoC의 고정된 78장만 사용한다. 모든 행은 활성 카드로 취급한다.
+MVP는 PoC의 고정된 78장만 사용한다. 모든 행은 활성 카드로 취급한다. 정식 78장 이미지가
+확정되기 전에는 PoC의 별, 태양, 절제 이미지를 반복 매핑한 더미 경로를 사용하며, 카드
+이미지 라이선스와 저장소가 확정되면 migration으로 `image_path`를 교체한다.
 
 #### `consultation_sessions`
 

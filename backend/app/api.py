@@ -22,6 +22,7 @@ from .models import (
     ConsultationEvent,
     ConsultationReport,
     ShareLink,
+    TarotCard,
     User,
     ensure_utc,
 )
@@ -76,8 +77,10 @@ def owned_consultation(db: Session, consultation_id: UUID, user: User) -> Consul
     return consultation
 
 
-def shuffled_deck() -> list[dict]:
-    card_ids = list(range(78))
+def shuffled_deck(db: Session) -> list[dict]:
+    card_ids = list(db.scalars(select(TarotCard.id).order_by(TarotCard.id)))
+    if len(card_ids) != 78:
+        raise APIError(503, "TAROT_DECK_NOT_READY", "타로 카드 데이터를 준비하고 있습니다.")
     random = secrets.SystemRandom()
     random.shuffle(card_ids)
     return [{"card_id": card_id, "reversed": bool(random.getrandbits(1))} for card_id in card_ids]
@@ -114,7 +117,7 @@ def create_consultation(
         user_id=user.id,
         deck_size=78,
         expected_card_count=settings.default_card_count,
-        deck_order=shuffled_deck(),
+        deck_order=shuffled_deck(db),
     )
     db.add(consultation)
     db.commit()
@@ -150,7 +153,14 @@ def list_consultations(
                 "expected_card_count": item.expected_card_count,
                 "report_status": item.report.status if item.report else None,
                 "situation_summary": item.report.situation_summary if item.report else None,
-                "thumbnail_image_url": None,
+                "thumbnail_image_url": next(
+                    (
+                        card_response(card)["image_url"]
+                        for card in item.cards
+                        if card.revealed_at is not None
+                    ),
+                    None,
+                ),
                 "created_at": ensure_utc(item.created_at),
                 "ended_at": ensure_utc(item.ended_at),
             }

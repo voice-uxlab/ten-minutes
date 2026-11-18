@@ -11,19 +11,20 @@ class Base(DeclarativeBase):
     pass
 
 
-def _engine_kwargs(database_url: str) -> dict:
-    if database_url.startswith("sqlite"):
-        return {"connect_args": {"check_same_thread": False}}
-    return {"pool_pre_ping": True, "pool_size": 5, "max_overflow": 5}
-
-
 settings = get_settings()
 database_url = settings.database_url
 if database_url.startswith("postgres://"):
     database_url = "postgresql+psycopg://" + database_url.removeprefix("postgres://")
 elif database_url.startswith("postgresql://"):
     database_url = "postgresql+psycopg://" + database_url.removeprefix("postgresql://")
-engine = create_engine(database_url, **_engine_kwargs(database_url))
+if not database_url.startswith("postgresql+psycopg://"):
+    raise ValueError("DATABASE_URL must use PostgreSQL with the psycopg driver.")
+engine = create_engine(
+    database_url,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=5,
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
 
