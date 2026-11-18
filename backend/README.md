@@ -20,9 +20,25 @@ uv run uvicorn app.main:app --reload --port 8000
 
 `pyproject.toml`과 `uv.lock`이 의존성의 기준입니다. `requirements*.txt`는 Vercel과 `uv`를 사용할 수 없는 환경을 위한 호환 파일입니다.
 
-로컬과 배포 환경 모두 PostgreSQL만 사용합니다. `DATABASE_URL`에는 psycopg URL을 설정하고,
-스키마와 78장 카드 기준 데이터는 Alembic으로 관리합니다. 새 DB에는 서버를 실행하기 전에
-`uv run alembic upgrade head`를 실행합니다. 앱 시작 시 테이블을 자동 생성하지 않습니다.
+로컬과 배포 환경 모두 PostgreSQL만 사용합니다. FastAPI는 `DATABASE_URL`, Alembic은
+`MIGRATION_DATABASE_URL`을 사용합니다. migration URL을 생략하면 `DATABASE_URL`로
+대체합니다. 스키마와 78장 카드 기준 데이터는 Alembic으로 관리하며 새 DB에는 서버를
+실행하기 전에 `uv run alembic upgrade head`를 실행합니다. 앱 시작 시 테이블을 자동
+생성하지 않습니다.
+
+Supabase에서는 로컬 실행과 migration에 Session pooler(5432)를 사용할 수 있습니다.
+Vercel에서는 FastAPI의 `DATABASE_URL`에 Transaction pooler(6543)를 사용하고 migration은
+Session 또는 Direct 연결로 실행합니다. 런타임 연결 풀은 서버리스 인스턴스당 1개이며
+transaction pooler 호환을 위해 psycopg prepared statement를 비활성화합니다.
+
+PostgreSQL 연결 확인은 별도 테스트 DB의 `TEST_DATABASE_URL`을 설정한 뒤 실행합니다.
+
+```bash
+uv run pytest -m postgresql
+```
+
+이 테스트는 migration 적용 여부와 78장 seed를 읽기 전용으로 확인합니다. URL이 없으면
+건너뛰며 일반 테스트는 계속 인메모리 DB 대역을 사용합니다.
 
 OAuth callback의 API origin은 `BACKEND_ORIGIN`, 로그인 후 이동·CORS·공유 링크의 웹
 origin은 `PUBLIC_WEB_ORIGIN`으로 설정합니다. 카드 이미지는 DB의

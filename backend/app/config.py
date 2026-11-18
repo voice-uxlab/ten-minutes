@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     backend_origin: str = "http://localhost:8000"
     public_web_origin: str = "http://localhost:5173"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes"
+    migration_database_url: Optional[str] = None
+    test_database_url: Optional[str] = None
+    database_pool_size: int = Field(default=1, ge=1, le=10)
+    database_max_overflow: int = Field(default=0, ge=0, le=10)
     session_cookie_name: str = "ten_minutes_session"
     session_cookie_secure: bool = False
     session_ttl_days: int = Field(default=14, ge=1, le=90)

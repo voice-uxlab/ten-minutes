@@ -8,7 +8,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, SmallIntege
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .database import Base
+from .db_base import Base
 
 
 def utcnow() -> datetime:

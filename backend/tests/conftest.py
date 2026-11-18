@@ -12,7 +12,8 @@ from sqlalchemy.pool import StaticPool
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from app.config import get_settings
-from app.database import Base, get_db
+from app.database import get_db
+from app.db_base import Base
 from app.main import app
 from app.models import ServiceSession, User
 from app.seed_cards import seed_tarot_cards

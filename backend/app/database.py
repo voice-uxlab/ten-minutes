@@ -2,28 +2,20 @@ from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from .config import get_settings
-
-
-class Base(DeclarativeBase):
-    pass
+from .db_base import Base
+from .db_url import normalize_postgres_url
 
 
 settings = get_settings()
-database_url = settings.database_url
-if database_url.startswith("postgres://"):
-    database_url = "postgresql+psycopg://" + database_url.removeprefix("postgres://")
-elif database_url.startswith("postgresql://"):
-    database_url = "postgresql+psycopg://" + database_url.removeprefix("postgresql://")
-if not database_url.startswith("postgresql+psycopg://"):
-    raise ValueError("DATABASE_URL must use PostgreSQL with the psycopg driver.")
 engine = create_engine(
-    database_url,
+    normalize_postgres_url(settings.database_url),
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=5,
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
+    connect_args={"prepare_threshold": None},
 )
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
