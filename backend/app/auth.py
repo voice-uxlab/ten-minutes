@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,9 +14,10 @@ from .config import Settings, get_settings
 from .database import get_db
 from .errors import APIError
 from .models import AuthIdentity, OAuthAttempt, ServiceSession, User
+from .openapi import PUBLIC_RESPONSES, error_response
 
 
-router = APIRouter(tags=["auth"])
+router = APIRouter(tags=["auth"], responses=PUBLIC_RESPONSES)
 
 PROVIDERS = {
     "kakao": {
@@ -46,9 +47,9 @@ def provider_credentials(provider: str, settings: Settings) -> tuple[str, Option
     elif provider == "naver":
         client_id, client_secret = settings.naver_client_id, settings.naver_client_secret
     else:
-        raise APIError(404, "AUTH_PROVIDER_NOT_FOUND", "지원하지 않는 로그인 방식입니다.")
+        raise APIError(404, "AUTH_PROVIDER_NOT_FOUND", "The authentication provider is not supported.")
     if not client_id:
-        raise APIError(503, "AUTH_PROVIDER_NOT_CONFIGURED", "로그인 제공자가 아직 설정되지 않았습니다.")
+        raise APIError(503, "AUTH_PROVIDER_NOT_CONFIGURED", "The authentication provider is not configured.")
     return client_id, client_secret
 
 
@@ -74,13 +75,29 @@ def current_user_optional(
 
 def current_user(user: Optional[User] = Depends(current_user_optional)) -> User:
     if not user:
-        raise APIError(401, "AUTHENTICATION_REQUIRED", "로그인이 필요합니다.")
+        raise APIError(401, "AUTHENTICATION_REQUIRED", "Authentication is required.")
     return user
 
 
-@router.get("/auth/{provider}/authorize", status_code=302)
+@router.get(
+    "/auth/{provider}/authorize",
+    status_code=302,
+    summary="Start social login",
+    description="Stores a single-use OAuth `state` value and redirects to the Kakao or Naver authorization page.",
+    responses={
+        302: {"description": "Redirects to the provider authorization page in the `Location` header"},
+        404: error_response(
+            404,
+            examples={"provider_not_found": ("AUTH_PROVIDER_NOT_FOUND", "The authentication provider is not supported.")},
+        ),
+        503: error_response(
+            503,
+            examples={"provider_not_configured": ("AUTH_PROVIDER_NOT_CONFIGURED", "The authentication provider is not configured.")},
+        ),
+    },
+)
 def authorize(
-    provider: str,
+    provider: str = Path(description="OAuth provider: `kakao` or `naver`", examples=["kakao"]),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -113,15 +130,15 @@ async def exchange_profile(
     async with httpx.AsyncClient(timeout=15) as client:
         token_response = await client.post(PROVIDERS[provider]["token"], data=token_data)
         if not token_response.is_success:
-            raise APIError(502, "OAUTH_TOKEN_EXCHANGE_FAILED", "로그인 제공자와 연결하지 못했습니다.")
+            raise APIError(502, "OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange the OAuth authorization code.")
         access_token = token_response.json().get("access_token")
         if not access_token:
-            raise APIError(502, "OAUTH_INVALID_RESPONSE", "로그인 제공자의 응답이 올바르지 않습니다.")
+            raise APIError(502, "OAUTH_INVALID_RESPONSE", "The OAuth provider returned an invalid response.")
         profile_response = await client.get(
             PROVIDERS[provider]["profile"], headers={"Authorization": f"Bearer {access_token}"}
         )
         if not profile_response.is_success:
-            raise APIError(502, "OAUTH_PROFILE_FAILED", "사용자 정보를 확인하지 못했습니다.")
+            raise APIError(502, "OAUTH_PROFILE_FAILED", "Failed to retrieve the OAuth user profile.")
         payload = profile_response.json()
     if provider == "kakao":
         provider_user_id = str(payload.get("id", ""))
@@ -133,16 +150,44 @@ async def exchange_profile(
         provider_user_id = str(payload.get("response", {}).get("id", ""))
         nickname = payload.get("response", {}).get("nickname")
     if not provider_user_id:
-        raise APIError(502, "OAUTH_INVALID_PROFILE", "로그인 제공자의 사용자 식별자가 없습니다.")
+        raise APIError(502, "OAUTH_INVALID_PROFILE", "The OAuth profile does not contain a user identifier.")
     return provider_user_id, nickname
 
 
-@router.get("/auth/{provider}/callback", status_code=302)
+@router.get(
+    "/auth/{provider}/callback",
+    status_code=302,
+    summary="Handle social login callback",
+    description="Exchanges the authorization code for a provider profile, issues a service-session cookie, and redirects to the frontend.",
+    responses={
+        302: {"description": "Redirects to `PUBLIC_WEB_ORIGIN` after success or user cancellation"},
+        400: error_response(
+            400,
+            examples={"invalid_state": ("OAUTH_STATE_INVALID", "The OAuth state is invalid or has expired.")},
+        ),
+        404: error_response(
+            404,
+            examples={"provider_not_found": ("AUTH_PROVIDER_NOT_FOUND", "The authentication provider is not supported.")},
+        ),
+        422: error_response(422),
+        502: error_response(
+            502,
+            examples={
+                "token_exchange_failed": ("OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange the OAuth authorization code."),
+                "profile_failed": ("OAUTH_PROFILE_FAILED", "Failed to retrieve the OAuth user profile."),
+            },
+        ),
+        503: error_response(
+            503,
+            examples={"provider_not_configured": ("AUTH_PROVIDER_NOT_CONFIGURED", "The authentication provider is not configured.")},
+        ),
+    },
+)
 async def callback(
-    provider: str,
-    state: str,
-    code: Optional[str] = None,
-    error: Optional[str] = None,
+    provider: str = Path(description="OAuth provider: `kakao` or `naver`", examples=["kakao"]),
+    state: str = Query(description="Single-use CSRF protection value issued when login started"),
+    code: Optional[str] = Query(default=None, description="Authorization code issued by the OAuth provider"),
+    error: Optional[str] = Query(default=None, description="Error code returned when the user cancels or the provider rejects the request"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -154,7 +199,7 @@ async def callback(
         or attempt.consumed_at is not None
         or aware(attempt.expires_at) <= datetime.now(timezone.utc)
     ):
-        raise APIError(400, "OAUTH_STATE_INVALID", "로그인 요청이 만료되었거나 올바르지 않습니다.")
+        raise APIError(400, "OAUTH_STATE_INVALID", "The OAuth state is invalid or has expired.")
     attempt.consumed_at = datetime.now(timezone.utc)
     db.commit()
     if error or not code:
@@ -202,7 +247,13 @@ async def callback(
     return response
 
 
-@router.post("/api/v1/auth/logout", status_code=204)
+@router.post(
+    "/api/v1/auth/logout",
+    status_code=204,
+    summary="Log out",
+    description="Revokes the current service session and deletes the browser session cookie. Returns 204 even when no cookie is present.",
+    responses={204: {"description": "Logout completed with no response body"}},
+)
 def logout(
     request: Request,
     response: Response,

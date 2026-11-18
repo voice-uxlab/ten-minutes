@@ -12,6 +12,16 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ErrorDetail(StrictModel):
+    code: str = Field(description="Stable error code used by the frontend for error handling")
+    message: str = Field(description="Human-readable error message")
+    request_id: str = Field(description="Request identifier used to correlate Vercel and application logs")
+
+
+class ErrorResponse(StrictModel):
+    error: ErrorDetail = Field(description="Error details included in every JSON error response")
+
+
 class AddressingMode(str, Enum):
     DEFAULT = "DEFAULT"
     CUSTOM = "CUSTOM"
@@ -54,23 +64,34 @@ SPREAD_POSITIONS = {
 
 
 class CurrentUserResponse(StrictModel):
-    id: UUID
-    addressing_mode: AddressingMode
-    nickname: Optional[str]
-    provider: Optional[str]
-    onboarding_required: bool
-    created_at: datetime
+    id: UUID = Field(description="Internal user ID")
+    addressing_mode: AddressingMode = Field(description="How the user is addressed during consultations")
+    nickname: Optional[str] = Field(description="Display name used when addressing mode is CUSTOM")
+    provider: Optional[str] = Field(description="Connected OAuth provider, or null when no identity is linked")
+    onboarding_required: bool = Field(description="Whether display-name or required-consent setup is incomplete")
+    created_at: datetime = Field(description="User creation timestamp in UTC ISO 8601 format")
 
 
 class UpdateCurrentUserRequest(StrictModel):
-    addressing_mode: AddressingMode
-    nickname: Optional[str] = Field(default=None, min_length=1, max_length=40)
-    consent_version: str = Field(min_length=1, max_length=40)
+    addressing_mode: AddressingMode = Field(description="Display-name mode: DEFAULT or CUSTOM")
+    nickname: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=40,
+        description="Display name required for CUSTOM mode. Stored as null for DEFAULT mode.",
+        examples=["대장"],
+    )
+    consent_version: str = Field(
+        min_length=1,
+        max_length=40,
+        description="Version of the AI-processing terms accepted by the user",
+        examples=["2026-11"],
+    )
 
     @model_validator(mode="after")
     def validate_nickname(self):
         if self.addressing_mode == AddressingMode.CUSTOM and not (self.nickname or "").strip():
-            raise ValueError("CUSTOM 호칭에는 nickname이 필요합니다.")
+            raise ValueError("nickname is required when addressing_mode is CUSTOM")
         if self.addressing_mode == AddressingMode.DEFAULT:
             self.nickname = None
         elif self.nickname:
@@ -79,21 +100,26 @@ class UpdateCurrentUserRequest(StrictModel):
 
 
 class CreateConsultationRequest(StrictModel):
-    consent_version: str = Field(min_length=1, max_length=40)
+    consent_version: str = Field(
+        min_length=1,
+        max_length=40,
+        description="Consent version that must match the version stored for the current user",
+        examples=["2026-11"],
+    )
 
 
 class CardResponse(StrictModel):
-    slot: int
-    picked_number: int
-    position: str
-    revealed: bool
-    card_id: Optional[int]
-    card_code: Optional[str]
-    name: Optional[str]
-    direction: Optional[CardDirection]
-    image_url: Optional[str]
-    keywords: Optional[list[str]]
-    revealed_at: Optional[datetime]
+    slot: int = Field(description="One-based card slot within the consultation")
+    picked_number: int = Field(description="Number from 1 to 78 selected by the user")
+    position: str = Field(description="Position represented by the card in the spread")
+    revealed: bool = Field(description="Whether the card has been revealed")
+    card_id: Optional[int] = Field(description="Database ID of the revealed card, or null before reveal")
+    card_code: Optional[str] = Field(description="Stable code of the revealed card, or null before reveal")
+    name: Optional[str] = Field(description="Korean card name, or null before reveal")
+    direction: Optional[CardDirection] = Field(description="UPRIGHT or REVERSED, or null before reveal")
+    image_url: Optional[str] = Field(description="Absolute image URL, or null before reveal")
+    keywords: Optional[list[str]] = Field(description="Keywords for the card direction, or null before reveal")
+    revealed_at: Optional[datetime] = Field(description="Card reveal timestamp, or null before reveal")
 
 
 class ReportCardResponse(CardResponse):
@@ -101,107 +127,120 @@ class ReportCardResponse(CardResponse):
 
 
 class ConsultationResponse(StrictModel):
-    id: UUID
-    status: ConsultationStatus
-    question: Optional[str]
-    spread_type: Optional[SpreadType]
-    deck_size: int
-    expected_card_count: int
-    cards: list[CardResponse]
-    report_status: Optional[ReportStatus]
-    created_at: datetime
-    ended_at: Optional[datetime]
+    id: UUID = Field(description="Consultation ID")
+    status: ConsultationStatus = Field(description="Current consultation state")
+    question: Optional[str] = Field(description="Confirmed question, or null before card selection")
+    spread_type: Optional[SpreadType] = Field(description="Selected three-card spread type")
+    deck_size: int = Field(description="Number of cards in the shuffled server deck; currently 78")
+    expected_card_count: int = Field(description="Number of cards required by the consultation; currently 3")
+    cards: list[CardResponse] = Field(description="Selected cards, or an empty array before selection")
+    report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report exists")
+    created_at: datetime = Field(description="Consultation creation timestamp")
+    ended_at: Optional[datetime] = Field(description="Consultation end timestamp, or null while active")
 
 
 class ConsultationListItem(StrictModel):
-    id: UUID
-    question: Optional[str]
-    spread_type: Optional[SpreadType]
-    status: ConsultationStatus
-    expected_card_count: int
-    report_status: Optional[ReportStatus]
-    situation_summary: Optional[str]
-    thumbnail_image_url: Optional[str]
-    created_at: datetime
-    ended_at: Optional[datetime]
+    id: UUID = Field(description="Consultation ID")
+    question: Optional[str] = Field(description="Confirmed consultation question")
+    spread_type: Optional[SpreadType] = Field(description="Selected spread type")
+    status: ConsultationStatus = Field(description="Consultation state")
+    expected_card_count: int = Field(description="Number of cards required")
+    report_status: Optional[ReportStatus] = Field(description="Report generation state")
+    situation_summary: Optional[str] = Field(description="One-line situation summary from the report")
+    thumbnail_image_url: Optional[str] = Field(description="Thumbnail URL for the first revealed card")
+    created_at: datetime = Field(description="Consultation creation timestamp")
+    ended_at: Optional[datetime] = Field(description="Consultation end timestamp")
 
 
 class ConsultationListResponse(StrictModel):
-    items: list[ConsultationListItem]
-    next_cursor: Optional[str]
+    items: list[ConsultationListItem] = Field(description="Consultations on the current page in reverse chronological order")
+    next_cursor: Optional[str] = Field(description="Consultation ID used as the next-page cursor, or null on the last page")
 
 
 class CardSelectionRequest(StrictModel):
-    question: str = Field(min_length=1, max_length=300)
-    spread_type: SpreadType
-    positions: Optional[list[str]] = None
-    picks: list[int]
+    question: str = Field(
+        min_length=1,
+        max_length=300,
+        description="Consultation question, trimmed before storage",
+        examples=["연락 없는 그 사람을 기다릴까?"],
+    )
+    spread_type: SpreadType = Field(description="Three-card spread type selected for the question")
+    positions: Optional[list[str]] = Field(
+        default=None,
+        description="Position names for the selected spread. Omit to use server defaults.",
+    )
+    picks: list[int] = Field(description="Three unique card numbers from 1 to 78", examples=[[7, 22, 51]])
 
     @field_validator("question")
     @classmethod
     def strip_question(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("질문을 입력해 주세요.")
+            raise ValueError("question must not be blank")
         return value
 
     @field_validator("picks")
     @classmethod
     def unique_picks(cls, value: list[int]) -> list[int]:
         if len(value) != len(set(value)):
-            raise ValueError("카드 번호는 중복될 수 없습니다.")
+            raise ValueError("card numbers must be unique")
         if any(number < 1 or number > 78 for number in value):
-            raise ValueError("카드 번호는 1부터 78까지입니다.")
+            raise ValueError("card numbers must be between 1 and 78")
         return value
 
 
 class CardSelectionResponse(StrictModel):
-    question: str
-    spread_type: SpreadType
-    cards: list[CardResponse]
+    question: str = Field(description="Question confirmed by the server")
+    spread_type: SpreadType = Field(description="Confirmed spread type")
+    cards: list[CardResponse] = Field(description="Three cards mapped from the server deck; details are null before reveal")
 
 
 class CardRevealResponse(StrictModel):
-    card: CardResponse
+    card: CardResponse = Field(description="Card revealed by this request or returned from a previous reveal")
 
 
 class EndConsultationRequest(StrictModel):
-    reason: str
+    reason: str = Field(description="Termination reason: USER, TIMEOUT, or ERROR", examples=["USER"])
 
     @field_validator("reason")
     @classmethod
     def valid_reason(cls, value: str) -> str:
         if value not in {"USER", "TIMEOUT", "ERROR"}:
-            raise ValueError("지원하지 않는 종료 사유입니다.")
+            raise ValueError("unsupported termination reason")
         return value
 
 
 class CardReading(StrictModel):
-    slot: int = Field(ge=1, le=10)
-    text: str = Field(min_length=1, max_length=1000)
+    slot: int = Field(ge=1, le=10, description="Slot of the card being interpreted")
+    text: str = Field(min_length=1, max_length=1000, description="Interpretation of the card in the consultation context")
 
 
 class SaveReportRequest(StrictModel):
-    situation_summary: str = Field(min_length=1, max_length=500)
-    readings: list[CardReading]
-    queen_line: str = Field(min_length=1, max_length=300)
+    situation_summary: str = Field(min_length=1, max_length=500, description="One-line situation summary")
+    readings: list[CardReading] = Field(description="Per-slot readings for every revealed card")
+    queen_line: str = Field(min_length=1, max_length=300, description="Closing message displayed in the report")
 
 
 class ReportResponse(StrictModel):
-    consultation_id: UUID
-    status: ReportStatus
-    spread_type: SpreadType
-    consulted_at: datetime
-    question: str
-    cards: list[ReportCardResponse]
-    situation_summary: str
-    readings: list[CardReading]
-    queen_line: str
-    created_at: datetime
+    consultation_id: UUID = Field(description="Consultation ID associated with the report")
+    status: ReportStatus = Field(description="Report generation state")
+    spread_type: SpreadType = Field(description="Spread type used for the consultation")
+    consulted_at: datetime = Field(description="Consultation start timestamp")
+    question: str = Field(description="Question confirmed during the consultation")
+    cards: list[ReportCardResponse] = Field(description="Revealed cards with images and individual readings")
+    situation_summary: str = Field(description="One-line situation summary")
+    readings: list[CardReading] = Field(description="Per-slot card readings")
+    queen_line: str = Field(description="Closing message")
+    created_at: datetime = Field(description="Report creation timestamp")
 
 
 class CreateShareLinkRequest(StrictModel):
-    hook_text: str = Field(min_length=1, max_length=100)
+    hook_text: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Public hook text shown instead of private report content",
+        examples=["이번 크리스마스 솔탈 확률은?"],
+    )
 
     @field_validator("hook_text")
     @classmethod
@@ -210,36 +249,36 @@ class CreateShareLinkRequest(StrictModel):
 
 
 class SharePreviewResponse(StrictModel):
-    title: str
-    description: str
-    image_url: Optional[str]
+    title: str = Field(description="Link preview title")
+    description: str = Field(description="Link preview description")
+    image_url: Optional[str] = Field(description="Share image URL, or null when no image is available")
 
 
 class ShareLinkResponse(StrictModel):
-    token: str
-    share_path: str
-    share_url: str
-    hook_text: str
-    cta_text: str = "나도 해보기"
-    preview: SharePreviewResponse
+    token: str = Field(description="Random token used to retrieve the public share page")
+    share_path: str = Field(description="Relative frontend path for the share page")
+    share_url: str = Field(description="Absolute public share URL")
+    hook_text: str = Field(description="Hook text displayed on the share page")
+    cta_text: str = Field(default="나도 해보기", description="Service CTA label")
+    preview: SharePreviewResponse = Field(description="Preview metadata for Open Graph and similar consumers")
 
 
 class PublicShareResponse(StrictModel):
-    hook_text: str
-    cta_text: str
-    cta_path: str
-    cta_url: str
-    preview: SharePreviewResponse
-    created_at: datetime
+    hook_text: str = Field(description="Public hook text; excludes the private question and report content")
+    cta_text: str = Field(description="Service CTA label")
+    cta_path: str = Field(description="Relative frontend path for the CTA")
+    cta_url: str = Field(description="Absolute CTA URL")
+    preview: SharePreviewResponse = Field(description="Share link preview metadata")
+    created_at: datetime = Field(description="Share link creation timestamp")
 
 
 class ClientEventRequest(StrictModel):
-    event: str
-    occurred_at: datetime
-    stage: Optional[str] = None
-    reason_code: Optional[str] = Field(default=None, max_length=80)
-    duration_ms: Optional[int] = Field(default=None, ge=0)
-    slot: Optional[int] = Field(default=None, ge=1, le=10)
+    event: str = Field(description="Supported consultation UX event name")
+    occurred_at: datetime = Field(description="Timestamp when the event occurred on the client")
+    stage: Optional[str] = Field(default=None, description="Required screen stage for FLOW_STAGE_ENTERED")
+    reason_code: Optional[str] = Field(default=None, max_length=80, description="Machine-readable failure or interruption reason code")
+    duration_ms: Optional[int] = Field(default=None, ge=0, description="Measured duration in milliseconds")
+    slot: Optional[int] = Field(default=None, ge=1, le=10, description="Card slot associated with the event")
 
     @field_validator("event")
     @classmethod
@@ -250,39 +289,39 @@ class ClientEventRequest(StrictModel):
             "TTS_PLAYBACK_CANCELLED", "PAGE_HIDDEN",
         }
         if value not in allowed:
-            raise ValueError("지원하지 않는 이벤트입니다.")
+            raise ValueError("unsupported event")
         return value
 
     @model_validator(mode="after")
     def validate_stage(self):
         if self.event == "FLOW_STAGE_ENTERED" and not self.stage:
-            raise ValueError("FLOW_STAGE_ENTERED에는 stage가 필요합니다.")
+            raise ValueError("stage is required for FLOW_STAGE_ENTERED")
         return self
 
 
 class ClientEventResponse(StrictModel):
-    event_id: UUID
-    stored_at: datetime
+    event_id: UUID = Field(description="Stored event ID")
+    stored_at: datetime = Field(description="Server storage timestamp")
 
 
 class RealtimeCredentialRequest(StrictModel):
-    connection_reason: str
+    connection_reason: str = Field(description="Connection reason: INITIAL or RECONNECT", examples=["INITIAL"])
 
     @field_validator("connection_reason")
     @classmethod
     def valid_reason(cls, value: str) -> str:
         if value not in {"INITIAL", "RECONNECT"}:
-            raise ValueError("지원하지 않는 연결 사유입니다.")
+            raise ValueError("unsupported connection reason")
         return value
 
 
 class RealtimeCredentialResponse(StrictModel):
-    client_secret: str
-    expires_at: int
-    realtime_model: str
+    client_secret: str = Field(description="Short-lived secret used only for a direct browser connection to OpenAI Realtime")
+    expires_at: int = Field(description="Client secret expiration time as a Unix timestamp")
+    realtime_model: str = Field(description="OpenAI Realtime model to connect to")
 
 
 class TTSRequest(StrictModel):
-    response_id: str = Field(min_length=1, max_length=200)
-    segment_index: int = Field(ge=0)
-    text: str = Field(min_length=1, max_length=500)
+    response_id: str = Field(min_length=1, max_length=200, description="ID used to associate an OpenAI response with TTS playback order")
+    segment_index: int = Field(ge=0, description="Zero-based audio segment index within the response")
+    text: str = Field(min_length=1, max_length=500, description="Text sent to Typecast for synthesis; never stored or logged")

@@ -18,6 +18,33 @@ uv run uvicorn app.main:app --reload --port 8000
 - OpenAPI UI: `http://localhost:8000/docs`
 - 테스트: `uv run pytest`
 
+## API 문서 사용법
+
+서버 실행 후 `http://localhost:8000/docs`에서 API별 요청 파라미터, 응답 필드와 상태 코드
+예시를 확인할 수 있습니다. 테스트하려면 API 항목을 펼치고 `Try it out`을 누른 뒤 값을
+입력해 `Execute`를 실행합니다. 인증이 필요한 API는 먼저 같은 브라우저에서 카카오 또는
+네이버 로그인을 완료해야 HttpOnly 세션 쿠키가 자동으로 전달됩니다.
+
+- `400`: OAuth state나 목록 cursor처럼 요청 자체가 올바르지 않음
+- `401`: 서비스 세션이 없거나 만료되어 로그인 필요
+- `404`: 본인 소유 리소스가 없거나 공개 공유 토큰이 유효하지 않음
+- `409`: 카드 공개 순서, 종료 상태, 리포트 중복처럼 현재 서버 상태와 요청이 충돌
+- `422`: 요청 body, path, query 또는 header 값의 형식과 검증 규칙이 맞지 않음
+- `500`: 예상하지 못한 백엔드 또는 DB 처리 오류. 응답의 `request_id`로 서버 로그 확인
+- `502`~`504`: OpenAI, Typecast 등 외부 서비스 오류, 미설정 또는 timeout
+
+오류 응답은 모두 다음 형식이며 내부 예외와 비밀값은 응답에 포함하지 않습니다.
+
+```json
+{
+  "error": {
+    "code": "INTERNAL_SERVER_ERROR",
+    "message": "The server could not process the request.",
+    "request_id": "req_..."
+  }
+}
+```
+
 `pyproject.toml`과 `uv.lock`이 의존성의 기준입니다. `requirements*.txt`는 Vercel과 `uv`를 사용할 수 없는 환경을 위한 호환 파일입니다.
 
 로컬과 배포 환경 모두 PostgreSQL만 사용합니다. FastAPI는 `DATABASE_URL`, Alembic은
@@ -64,6 +91,6 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 - 78장 서버 덱, 4개 스프레드, 중복 없는 3장 확정, 카드 순차 공개
 - OpenAI Realtime client secret 발급, Typecast 스트리밍 프록시
 - 상담 이벤트, 개인 리포트 저장/조회
-- 후킹 문구 기반 공유 링크 생성과 공개 teaser 조회
+- 후킹 문구 기반 공유 링크 생성과 공유 미리보기 조회
 
 공개 공유 API는 질문, 카드, 카드별 해석, 상황 요약, “언니”의 한마디를 반환하지 않습니다. 개인 리포트 전문은 인증된 상담 소유자만 조회할 수 있습니다.

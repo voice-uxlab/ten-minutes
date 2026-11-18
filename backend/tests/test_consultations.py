@@ -175,6 +175,7 @@ def test_openai_login_provider_is_not_available(authenticated_client):
     response = client.get("/auth/openai/authorize")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "AUTH_PROVIDER_NOT_FOUND"
+    assert response.json()["error"]["message"] == "The authentication provider is not supported."
 
 
 def test_oauth_authorize_uses_backend_origin(db_session):
@@ -274,3 +275,89 @@ def test_tarot_cards_are_seeded_and_images_are_served(authenticated_client, db_s
     image_response = client.get(image_url)
     assert image_response.status_code == 200
     assert image_response.headers["content-type"] == "image/png"
+
+
+def test_openapi_documents_parameters_response_fields_and_actual_errors():
+    import re
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        schema = client.get("/openapi.json").json()
+
+    selection = schema["paths"]["/api/v1/consultations/{consultation_id}/card-selection"]["post"]
+    assert selection["summary"] == "Confirm card selection"
+    assert set(selection["responses"]) >= {"201", "401", "404", "409", "422", "500"}
+    assert "CARD_SELECTION_LOCKED" == selection["responses"]["409"]["content"][
+        "application/json"
+    ]["examples"]["selection_locked"]["value"]["error"]["code"]
+
+    id_parameter = next(
+        parameter for parameter in selection["parameters"] if parameter["name"] == "consultation_id"
+    )
+    idempotency_parameter = next(
+        parameter for parameter in selection["parameters"] if parameter["name"] == "Idempotency-Key"
+    )
+    assert id_parameter["description"]
+    assert idempotency_parameter["description"]
+
+    get_me = schema["paths"]["/api/v1/users/me"]["get"]
+    assert "409" not in get_me["responses"]
+    assert "422" not in get_me["responses"]
+    assert "500" in get_me["responses"]
+
+    card_schema = schema["components"]["schemas"]["CardResponse"]
+    assert card_schema["properties"]["image_url"]["description"]
+    error_schema = schema["components"]["schemas"]["ErrorResponse"]
+    assert error_schema["properties"]["error"]["description"]
+
+    def openapi_text_values(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"description", "summary", "message"} and isinstance(item, str):
+                    yield item
+                yield from openapi_text_values(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from openapi_text_values(item)
+
+    assert not [
+        text for text in openapi_text_values(schema) if re.search(r"[가-힣]", text)
+    ]
+
+
+def test_unhandled_error_response_hides_internal_exception_details():
+    import asyncio
+    import json
+
+    from starlette.requests import Request
+
+    from app.errors import unhandled_error_handler
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/example",
+            "headers": [],
+            "query_string": b"",
+            "server": ("testserver", 80),
+            "client": ("testclient", 50000),
+            "scheme": "http",
+        }
+    )
+    request.state.request_id = "req_test_500"
+    response = asyncio.run(unhandled_error_handler(request, RuntimeError("database-password")))
+    payload = json.loads(response.body)
+
+    assert response.status_code == 500
+    assert payload == {
+        "error": {
+            "code": "INTERNAL_SERVER_ERROR",
+            "message": "The server could not process the request.",
+            "request_id": "req_test_500",
+        }
+    }
+    assert b"database-password" not in response.body
