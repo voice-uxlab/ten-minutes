@@ -47,6 +47,12 @@ origin은 `PUBLIC_WEB_ORIGIN`으로 설정합니다. 카드 이미지는 DB의
 78장에 반복 매핑한 임시 데이터입니다. 정식 카드 이미지가 준비되면 파일과 seed 경로를
 교체해야 합니다.
 
+로컬 HTTP 환경에서는 `SESSION_COOKIE_SECURE=false`, `SESSION_COOKIE_SAMESITE=lax`를
+사용합니다. 프론트엔드와 백엔드가 서로 다른 HTTPS 도메인으로 배포되는 Vercel 환경에서는
+브라우저가 인증 쿠키를 교차 사이트 API 요청에도 보내도록
+`SESSION_COOKIE_SECURE=true`, `SESSION_COOKIE_SAMESITE=none`으로 설정해야 합니다.
+프론트엔드 요청에도 `credentials: "include"`가 필요합니다.
+
 OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다. 상담용 호칭은
 `PATCH /api/v1/users/me`에서 사용자가 `CUSTOM`을 선택했을 때만 저장하며, Provider 이메일은
 현재 수집하거나 저장하지 않습니다.

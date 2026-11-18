@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=0, ge=0, le=10)
     session_cookie_name: str = "ten_minutes_session"
     session_cookie_secure: bool = False
+    session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     session_ttl_days: int = Field(default=14, ge=1, le=90)
     oauth_state_ttl_seconds: int = Field(default=600, ge=60, le=1800)
 

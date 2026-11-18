@@ -204,6 +204,29 @@ def test_oauth_authorize_uses_backend_origin(db_session):
     assert query["redirect_uri"] == ["http://localhost:8000/auth/kakao/callback"]
 
 
+def test_logout_uses_cross_site_cookie_settings(authenticated_client):
+    from app.config import Settings, get_settings
+    from app.main import app
+
+    client, _ = authenticated_client
+    settings = Settings(
+        session_cookie_secure=True,
+        session_cookie_samesite="none",
+        database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        response = client.post("/api/v1/auth/logout")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 204
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "samesite=none" in set_cookie
+    assert "secure" in set_cookie
+    assert "httponly" in set_cookie
+
+
 def test_current_user_response_and_custom_nickname(authenticated_client, db_session):
     from app.models import AuthIdentity
 

@@ -196,7 +196,7 @@ async def callback(
         max_age=settings.session_ttl_days * 86400,
         secure=settings.session_cookie_secure,
         httponly=True,
-        samesite="lax",
+        samesite=settings.session_cookie_samesite,
         path="/",
     )
     return response
@@ -217,6 +217,12 @@ def logout(
         if service_session and service_session.revoked_at is None:
             service_session.revoked_at = datetime.now(timezone.utc)
             db.commit()
-    response.delete_cookie(settings.session_cookie_name, path="/")
+    response.delete_cookie(
+        settings.session_cookie_name,
+        path="/",
+        secure=settings.session_cookie_secure,
+        httponly=True,
+        samesite=settings.session_cookie_samesite,
+    )
     response.status_code = 204
     return response
