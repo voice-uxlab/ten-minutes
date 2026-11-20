@@ -42,6 +42,10 @@ FastAPI의 `PUBLIC_WEB_ORIGIN`은 실제 프론트엔드 origin과 일치해야 
 
 FastAPI가 `onboarding_required`를 반환하면 첫 로그인 설정에서 기본 호칭(`DEFAULT`) 또는 사용자 닉네임(`CUSTOM`, 최대 40자)을 선택합니다. 동의 확인 후 `PATCH /api/v1/users/me`에 선택한 호칭과 `consent_version`을 저장합니다.
 
+### 로그인 하단 정책 안내
+
+로그인 화면 하단의 이용약관과 개인정보처리방침은 화면 안의 다이얼로그에서 열립니다. 데모 안내 문구는 `src/pages/home.tsx`에서 관리하며 팀이 확정한 본문으로 교체할 수 있습니다.
+
 ## 구성
 
 | 항목 | 구현 |

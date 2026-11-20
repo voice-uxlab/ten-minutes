@@ -354,6 +354,13 @@ small,
 .consent input {
   accent-color: var(--pink);
 }
+.login-policies {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  color: var(--pink);
+}
 .login-recovery {
   position: relative;
   display: grid;

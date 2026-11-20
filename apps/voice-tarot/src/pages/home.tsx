@@ -25,6 +25,8 @@ import { Reader, Panel } from "@/components/tarot";
 const loginAttemptKey = "voice-tarot:login-attempt";
 const loginProviders = { naver: "네이버", kakao: "카카오" } as const;
 type LoginProvider = keyof typeof loginProviders;
+const aiProcessing =
+  "음성 타로 상담을 위해 내 음성을 OpenAI에, AI 답변 텍스트를 Typecast에 전송하여 처리하는 데 동의합니다.";
 
 function lastLoginProvider(): LoginProvider | null {
   const provider = sessionStorage.getItem(loginAttemptKey);
@@ -86,15 +88,18 @@ export function Login() {
           </Link>
         </Button>
       </div>
-      <PolicyDialog title="이용 안내">
-        타로는 선택을 돕는 참고용 상담이에요. 이용권은 실제 결제가 없는 데모
-        기능이에요.
-      </PolicyDialog>
-      <PolicyDialog title="개인정보 및 음성 처리 안내">
-        상담 음성은 OpenAI로, 답변 텍스트는 Typecast로 전송해요. 상담 요약은 이
-        브라우저에, 질문과 카드는 이어보기를 위해 앱 서버에 보관돼요. 소셜
-        로그인은 회원 식별자와 닉네임을 사용해요.
-      </PolicyDialog>
+      <div className="login-policies">
+        <PolicyDialog title="이용약관">
+          데모 이용 안내입니다. 타로는 선택을 돕는 참고용 상담이에요.
+          데모 이용권에는 실제 결제가 없어요.
+        </PolicyDialog>
+        <span aria-hidden="true">·</span>
+        <PolicyDialog title="개인정보처리방침">
+          데모 개인정보 처리 안내입니다. 상담 음성은 OpenAI에, AI 답변
+          텍스트는 Typecast에 전송해요. 상담 요약은 이 브라우저에, 질문과
+          카드는 이어보기를 위해 앱 서버에 보관해요.
+        </PolicyDialog>
+      </div>
     </section>
   );
 }
@@ -181,8 +186,7 @@ export function Onboarding() {
           </label>
           {member ? (
             <label className="consent">
-              <input type="checkbox" required /> 상담 음성과 답변 텍스트의 AI
-              처리에 동의해요.
+              <input type="checkbox" required /> {aiProcessing}
             </label>
           ) : null}
           {member && !consentVersion ? (
@@ -415,7 +419,7 @@ export function Home({
           />{" "}
           {voiceEngine === "live-noeul"
             ? "음성을 OpenAI에 전송하여 음성 상담을 진행하는 데 동의해요."
-            : "음성을 OpenAI에, 답변 텍스트를 타입캐스트에 전송하는 데 동의해요."}
+            : aiProcessing}
         </label>
       </Panel>
       <Button
