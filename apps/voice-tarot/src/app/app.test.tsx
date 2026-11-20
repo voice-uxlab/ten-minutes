@@ -24,6 +24,7 @@ beforeEach(async () => {
   );
   creates = 0;
   localStorage.clear();
+  sessionStorage.clear();
   history.replaceState({}, "", "/");
   queryClient.clear();
   vi.stubGlobal(
@@ -42,6 +43,34 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await rm(dir, { recursive: true, force: true });
 });
+test("cancelled social login offers retry and nickname experience", async () => {
+  sessionStorage.setItem("voice-tarot:login-attempt", "naver");
+  history.replaceState({}, "", "/?auth_error=cancelled");
+  render(<App />);
+  expect((await screen.findByRole("alert")).textContent).toContain("로그인을 취소했어요.");
+  const retry = screen.getByRole("link", { name: "네이버 로그인 다시 시도" });
+  expect(retry.getAttribute("href")).toBe(
+    screen.getByRole("link", { name: "네이버로 시작하기" }).getAttribute("href"),
+  );
+  await userEvent.click(screen.getByRole("link", { name: "닉네임으로 체험하기" }));
+  expect(await screen.findByLabelText("닉네임")).toBeTruthy();
+  expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
+});
+
+test("returning to the login page after leaving for OAuth restores retry", async () => {
+  history.replaceState({}, "", "/login");
+  render(<App />);
+  const kakao = screen.getByRole("link", { name: "카카오로 시작하기" });
+  kakao.addEventListener("click", (event) => event.preventDefault(), { once: true });
+  fireEvent.click(kakao);
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent(window, new Event("pageshow"));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("소셜 로그인을 완료할 수 없습니다.");
+  expect(alert.textContent).toContain("다시 시도하거나 닉네임으로 체험할 수 있습니다.");
+  expect(screen.getByRole("link", { name: "카카오 로그인 다시 시도" }).getAttribute("href")).toBe(kakao.getAttribute("href"));
+});
+
 test("React StrictMode: onboard → demo → partial picks → reveals → notes/report; URL reload creates no session", async () => {
   const errors = vi.spyOn(console, "error");
   const user = userEvent.setup();

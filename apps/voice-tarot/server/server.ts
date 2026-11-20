@@ -4,6 +4,7 @@ import { defaults, applyVoiceSettings } from "./voice-settings.ts";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { attachSpeechSocket } from "./speech-socket.ts";
 import { cards } from "../shared/cards.ts";
 import { getInstructions } from "./instructions.ts";
@@ -22,7 +23,7 @@ import { handleAuth } from "./auth.ts";
 import { ReadingStore } from "./reading-store.ts";
 const readings = new ReadingStore(
   process.env.READING_STORE_DIR ||
-    new URL("../poc/.reading-sessions/", import.meta.url).pathname,
+    fileURLToPath(new URL("../poc/.reading-sessions/", import.meta.url)),
   shuffle,
 );
 export const server = createServer(async (req, res) => {
@@ -274,7 +275,7 @@ export const server = createServer(async (req, res) => {
   }
 });
 attachSpeechSocket(server);
-if (process.argv[1] === new URL(import.meta.url).pathname)
+if (process.argv[1] === fileURLToPath(import.meta.url))
   server.listen(Number(process.env.PORT || 3000), "127.0.0.1", () =>
     console.log("퀸의 타로 http://localhost:" + (process.env.PORT || 3000)),
   );

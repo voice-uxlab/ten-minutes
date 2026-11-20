@@ -354,6 +354,32 @@ small,
 .consent input {
   accent-color: var(--pink);
 }
+.login-recovery {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid #ffb2ce80;
+  border-radius: 16px;
+  background: #262029;
+  color: #fff4f8;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+.login-recovery::after {
+  position: absolute;
+  inset-block-end: -6px;
+  inset-inline-start: calc(50% - 6px);
+  width: 11px;
+  height: 11px;
+  border-inline-end: 1px solid #ffb2ce80;
+  border-block-end: 1px solid #ffb2ce80;
+  background: inherit;
+  transform: rotate(45deg);
+  content: "";
+}
 .intro > .hint {
   text-align: center;
   font-size: 11px;
