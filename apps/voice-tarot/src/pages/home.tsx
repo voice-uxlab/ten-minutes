@@ -415,7 +415,7 @@ export function Home({
   }
   return (
     <section className="page intro">
-      <fieldset className="panel" disabled={create.isPending}>
+      <fieldset className="panel consultation-options" disabled={create.isPending}>
         <legend>상담 버전 선택</legend>
         <label className="consent">
           <input
@@ -441,7 +441,7 @@ export function Home({
           둘 다 레나의 목소리 · 1.3배속이에요. 새 통화에 선택한 버전을 적용해요.
         </p>
       </fieldset>
-      <fieldset className="panel" disabled={create.isPending}>
+      <fieldset className="panel consultation-options" disabled={create.isPending}>
         <legend>테스트 · 페르소나 선택</legend>
         {personas.map((persona) => (
           <label className="consent" key={persona.id}>

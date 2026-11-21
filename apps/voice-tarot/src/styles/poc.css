@@ -392,6 +392,27 @@ small,
 .consent input {
   accent-color: var(--pink);
 }
+.consultation-options {
+  min-width: 0;
+  padding: 4px 12px 12px;
+}
+.consultation-options legend {
+  padding-inline: 4px;
+}
+.consultation-options .consent {
+  align-items: center;
+  min-height: 44px;
+  margin-top: 0;
+  font-size: 14px;
+}
+.consultation-options input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.consultation-options .hint {
+  margin-top: 4px;
+}
 .login-policies {
   display: flex;
   flex-wrap: wrap;
@@ -445,7 +466,7 @@ small,
   gap: 8px;
   align-items: center;
 }
-input:not([type="checkbox"]) {
+input:not([type="checkbox"], [type="radio"]) {
   width: 100%;
   min-width: 0;
   background: #ffffff12;
