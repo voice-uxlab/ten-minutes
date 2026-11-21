@@ -271,7 +271,9 @@ def test_oauth_authorize_returns_503_when_provider_is_not_configured(db_session)
     assert response.json()["error"]["code"] == "AUTH_PROVIDER_NOT_CONFIGURED"
 
 
-def test_oauth_authorize_redirects_to_frontend_when_database_fails(db_session, monkeypatch):
+def test_oauth_authorize_redirects_to_frontend_when_database_fails(
+    db_session, monkeypatch, caplog
+):
     from fastapi.testclient import TestClient
     from sqlalchemy.exc import OperationalError
 
@@ -297,6 +299,28 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(db_session, m
 
     assert response.status_code == 302
     assert response.headers["location"] == "https://web.example.com/login?auth_error=failed"
+    assert "database_error_category=unclassified" in caplog.text
+    assert "dbapi_exception_type=RuntimeError" in caplog.text
+
+
+def test_database_operational_errors_are_classified_without_logging_details():
+    from sqlalchemy.exc import OperationalError
+
+    from app.auth import classify_database_operational_error
+
+    cases = {
+        "password authentication failed for user": "authentication_failed",
+        "Tenant or user not found": "pooler_identity_invalid",
+        "connection timed out": "connection_timeout",
+        "connection refused": "connection_refused",
+        "max client connections reached": "connection_limit",
+    }
+    for message, expected in cases.items():
+        error = OperationalError("CONNECT", {}, RuntimeError(message))
+        category, sqlstate, dbapi_exception_type = classify_database_operational_error(error)
+        assert category == expected
+        assert sqlstate is None
+        assert dbapi_exception_type == "RuntimeError"
 
 
 def test_logout_uses_cross_site_cookie_settings(authenticated_client):
