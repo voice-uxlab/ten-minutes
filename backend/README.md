@@ -69,10 +69,12 @@ uv run pytest -m postgresql
 
 OAuth callback의 API origin은 `BACKEND_ORIGIN`, 로그인 후 이동·CORS·공유 링크의 웹
 origin은 `PUBLIC_WEB_ORIGIN`으로 설정합니다. 카드 이미지는 DB의
-`tarot_cards.image_path`에 공개 경로를 저장하고 실제 PNG 파일은 현재 백엔드의
-`app/static/cards`에서 제공합니다. 현재 앞면 이미지는 PoC의 별, 태양, 절제 세 장을
-78장에 반복 매핑한 임시 데이터입니다. 정식 카드 이미지가 준비되면 파일과 seed 경로를
-교체해야 합니다.
+`tarot_cards.image_path`에 `major/00-fool.png`와 같은 상대 object path만 저장합니다.
+Supabase Storage의 공개 버킷 및 버전 폴더까지 포함한 URL은
+`TAROT_CARD_ASSET_BASE_URL`에 설정하며, API 응답에서 이를 조합해 완전한 이미지 URL을
+반환합니다. 정식 앞면 78장은 `major`, `wands`, `cups`, `swords`, `pentacles` 폴더로
+구분하며 DB ID와 영문 slug를 조합한 파일명을 사용합니다. 해당 환경변수가 비어 있으면
+로컬 개발을 위해 `BACKEND_ORIGIN/static/cards`를 기본 경로로 사용합니다.
 
 로컬 HTTP 환경에서는 `SESSION_COOKIE_SECURE=false`, `SESSION_COOKIE_SAMESITE=lax`를
 사용합니다. 프론트엔드와 백엔드가 서로 다른 HTTPS 도메인으로 배포되는 Vercel 환경에서는

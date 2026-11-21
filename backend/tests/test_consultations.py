@@ -18,6 +18,37 @@ def select_cards(client, consultation_id):
     return response.json()
 
 
+def test_tarot_card_taxonomy_covers_the_full_deck():
+    from collections import Counter
+
+    from app.deck import (
+        DECK,
+        MINOR_RANKS,
+        MINOR_SUITS,
+        card_code,
+        card_image_path,
+        card_taxonomy,
+    )
+
+    taxonomy = [card_taxonomy(card_id) for card_id, *_ in DECK]
+    codes = [card_code(card_id) for card_id, *_ in DECK]
+    image_paths = [card_image_path(card_id) for card_id, *_ in DECK]
+    assert len(taxonomy) == 78
+    assert len(set(codes)) == 78
+    assert len(set(image_paths)) == 78
+    assert Counter(card.arcana for card in taxonomy) == {"MAJOR": 22, "MINOR": 56}
+    assert Counter(card.suit for card in taxonomy if card.suit) == {
+        suit: len(MINOR_RANKS) for suit in MINOR_SUITS
+    }
+    assert [(card.suit, card.rank) for card in taxonomy[22:]] == [
+        (suit, rank) for suit in MINOR_SUITS for rank in MINOR_RANKS
+    ]
+    assert image_paths[0] == "major/00-fool.png"
+    assert image_paths[22] == "wands/22-ace.png"
+    assert image_paths[-1] == "pentacles/77-king.png"
+    assert all(not path.startswith("/") for path in image_paths)
+
+
 def test_consultation_cards_are_fixed_and_revealed_in_order(authenticated_client):
     client, _ = authenticated_client
     consultation = create_consultation(client)
@@ -26,6 +57,9 @@ def test_consultation_cards_are_fixed_and_revealed_in_order(authenticated_client
     assert all(card["revealed"] is False for card in selected["cards"])
     assert all(card["card_id"] is None for card in selected["cards"])
     assert all(card["name"] is None for card in selected["cards"])
+    assert all(card["arcana"] is None for card in selected["cards"])
+    assert all(card["suit"] is None for card in selected["cards"])
+    assert all(card["rank"] is None for card in selected["cards"])
     assert all(card["direction"] is None for card in selected["cards"])
 
     retry = client.post(
@@ -49,8 +83,19 @@ def test_consultation_cards_are_fixed_and_revealed_in_order(authenticated_client
         assert reveal.status_code == 200
         assert reveal.json()["card"]["slot"] == slot
         assert reveal.json()["card"]["revealed"] is True
-        assert reveal.json()["card"]["card_code"].startswith("card-")
+        assert not reveal.json()["card"]["card_code"].startswith("card-")
         assert reveal.json()["card"]["name"]
+        assert reveal.json()["card"]["arcana"] in {"MAJOR", "MINOR"}
+        if reveal.json()["card"]["arcana"] == "MAJOR":
+            assert reveal.json()["card"]["suit"] is None
+        else:
+            assert reveal.json()["card"]["suit"] in {
+                "WANDS",
+                "CUPS",
+                "SWORDS",
+                "PENTACLES",
+            }
+        assert reveal.json()["card"]["rank"]
 
 
 def test_report_is_private_and_share_response_contains_only_hook(authenticated_client):
@@ -306,10 +351,25 @@ def test_current_user_response_and_custom_nickname(authenticated_client, db_sess
     assert user.nickname == "대장"
 
 
-def test_tarot_cards_are_seeded_and_images_are_served(authenticated_client, db_session):
+def test_tarot_card_urls_use_the_configured_asset_base_url(
+    authenticated_client, db_session, monkeypatch
+):
     from sqlalchemy import func, select
 
+    from app import serializers
+    from app.config import Settings
     from app.models import TarotCard
+
+    monkeypatch.setattr(
+        serializers,
+        "get_settings",
+        lambda: Settings(
+            tarot_card_asset_base_url=(
+                "https://project.supabase.co/storage/v1/object/public/"
+                "tarot-cards/v1"
+            )
+        ),
+    )
 
     client, _ = authenticated_client
     assert db_session.scalar(select(func.count()).select_from(TarotCard)) == 78
@@ -319,11 +379,9 @@ def test_tarot_cards_are_seeded_and_images_are_served(authenticated_client, db_s
     revealed = client.post(f"/api/v1/consultations/{consultation['id']}/cards/1/reveal")
     assert revealed.status_code == 200
     image_url = revealed.json()["card"]["image_url"]
-    assert image_url.startswith("http://localhost:8000/static/cards/")
-
-    image_response = client.get(image_url)
-    assert image_response.status_code == 200
-    assert image_response.headers["content-type"] == "image/png"
+    assert image_url.startswith(
+        "https://project.supabase.co/storage/v1/object/public/tarot-cards/v1/"
+    )
 
 
 def test_openapi_documents_parameters_response_fields_and_actual_errors():
@@ -359,6 +417,7 @@ def test_openapi_documents_parameters_response_fields_and_actual_errors():
 
     card_schema = schema["components"]["schemas"]["CardResponse"]
     assert card_schema["properties"]["image_url"]["description"]
+    assert set(card_schema["properties"]) >= {"arcana", "suit", "rank"}
     error_schema = schema["components"]["schemas"]["ErrorResponse"]
     assert error_schema["properties"]["error"]["description"]
 

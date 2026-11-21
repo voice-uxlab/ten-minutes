@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_env: str = "local"
     backend_origin: str = "http://localhost:8000"
     public_web_origin: str = "http://localhost:5173"
+    tarot_card_asset_base_url: Optional[str] = None
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes"
     migration_database_url: Optional[str] = None
     test_database_url: Optional[str] = None

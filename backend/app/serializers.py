@@ -11,7 +11,14 @@ def public_origin(settings: Settings) -> str:
 def card_image_url(image_path: str) -> str:
     if image_path.startswith(("http://", "https://")):
         return image_path
-    return f"{get_settings().backend_origin.rstrip('/')}/{image_path.lstrip('/')}"
+    settings = get_settings()
+    base_url = settings.tarot_card_asset_base_url
+    if base_url:
+        return f"{base_url.rstrip('/')}/{image_path.lstrip('/')}"
+    return (
+        f"{settings.backend_origin.rstrip('/')}/static/cards/"
+        f"{image_path.lstrip('/')}"
+    )
 
 
 def user_response(user: User) -> dict:
@@ -41,6 +48,9 @@ def card_response(
         "card_id": None,
         "card_code": None,
         "name": None,
+        "arcana": None,
+        "suit": None,
+        "rank": None,
         "direction": None,
         "image_url": None,
         "keywords": None,
@@ -59,6 +69,9 @@ def card_response(
             "card_id": card.card_id,
             "card_code": definition.code,
             "name": definition.name_ko,
+            "arcana": definition.arcana,
+            "suit": definition.suit,
+            "rank": definition.rank,
             "direction": card.direction,
             "image_url": card_image_url(definition.image_path),
             "keywords": list(keywords),

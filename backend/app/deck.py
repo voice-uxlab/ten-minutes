@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 
 class TarotCard(NamedTuple):
@@ -6,6 +6,55 @@ class TarotCard(NamedTuple):
     name: str
     upright: tuple[str, ...]
     reversed: tuple[str, ...]
+
+
+class TarotCardTaxonomy(NamedTuple):
+    arcana: str
+    suit: Optional[str]
+    rank: str
+
+
+MINOR_SUITS = ("WANDS", "CUPS", "SWORDS", "PENTACLES")
+MAJOR_SLUGS = (
+    "fool",
+    "magician",
+    "high-priestess",
+    "empress",
+    "emperor",
+    "hierophant",
+    "lovers",
+    "chariot",
+    "strength",
+    "hermit",
+    "wheel-of-fortune",
+    "justice",
+    "hanged-man",
+    "death",
+    "temperance",
+    "devil",
+    "tower",
+    "star",
+    "moon",
+    "sun",
+    "judgement",
+    "world",
+)
+MINOR_RANKS = (
+    "ACE",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "PAGE",
+    "KNIGHT",
+    "QUEEN",
+    "KING",
+)
 
 
 DECK = (
@@ -93,6 +142,33 @@ DECK = (
 def card_by_id(card_id: int) -> TarotCard:
     raw = DECK[card_id]
     return TarotCard(*raw)
+
+
+def card_taxonomy(card_id: int) -> TarotCardTaxonomy:
+    if not 0 <= card_id < len(DECK):
+        raise ValueError(f"card_id must be between 0 and {len(DECK) - 1}")
+    if card_id < 22:
+        return TarotCardTaxonomy(arcana="MAJOR", suit=None, rank=str(card_id))
+    minor_index = card_id - 22
+    suit = MINOR_SUITS[minor_index // len(MINOR_RANKS)]
+    rank = MINOR_RANKS[minor_index % len(MINOR_RANKS)]
+    return TarotCardTaxonomy(arcana="MINOR", suit=suit, rank=rank)
+
+
+def card_code(card_id: int) -> str:
+    taxonomy = card_taxonomy(card_id)
+    if taxonomy.arcana == "MAJOR":
+        return f"major-{card_id:02d}-{MAJOR_SLUGS[card_id]}"
+    return f"{taxonomy.suit.lower()}-{taxonomy.rank.lower()}"
+
+
+def card_image_path(card_id: int) -> str:
+    taxonomy = card_taxonomy(card_id)
+    if taxonomy.arcana == "MAJOR":
+        filename = f"{card_id:02d}-{MAJOR_SLUGS[card_id]}.png"
+        return f"major/{filename}"
+    filename = f"{card_id:02d}-{taxonomy.rank.lower()}.png"
+    return f"{taxonomy.suit.lower()}/{filename}"
 
 
 DUMMY_CARD_IMAGE_PATHS = (

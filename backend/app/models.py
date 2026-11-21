@@ -4,7 +4,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, SmallInteger, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    SmallInteger,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -75,10 +85,24 @@ class OAuthAttempt(Base):
 
 class TarotCard(Base):
     __tablename__ = "tarot_cards"
+    __table_args__ = (
+        CheckConstraint(
+            "arcana IN ('MAJOR', 'MINOR')",
+            name="ck_tarot_cards_arcana",
+        ),
+        CheckConstraint(
+            "(arcana = 'MAJOR' AND suit IS NULL) OR "
+            "(arcana = 'MINOR' AND suit IN ('WANDS', 'CUPS', 'SWORDS', 'PENTACLES'))",
+            name="ck_tarot_cards_suit",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
     code: Mapped[str] = mapped_column(String(64), unique=True)
     name_ko: Mapped[str] = mapped_column(String(64))
+    arcana: Mapped[str] = mapped_column(String(8))
+    suit: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    rank: Mapped[str] = mapped_column(String(16))
     upright_keywords: Mapped[list[str]] = mapped_column(
         JSON().with_variant(ARRAY(String()), "postgresql")
     )

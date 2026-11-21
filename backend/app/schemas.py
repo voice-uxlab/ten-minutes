@@ -49,6 +49,18 @@ class CardDirection(str, Enum):
     REVERSED = "REVERSED"
 
 
+class Arcana(str, Enum):
+    MAJOR = "MAJOR"
+    MINOR = "MINOR"
+
+
+class TarotSuit(str, Enum):
+    WANDS = "WANDS"
+    CUPS = "CUPS"
+    SWORDS = "SWORDS"
+    PENTACLES = "PENTACLES"
+
+
 class ReportStatus(str, Enum):
     PENDING = "PENDING"
     COMPLETED = "COMPLETED"
@@ -116,6 +128,9 @@ class CardResponse(StrictModel):
     card_id: Optional[int] = Field(description="Database ID of the revealed card, or null before reveal")
     card_code: Optional[str] = Field(description="Stable code of the revealed card, or null before reveal")
     name: Optional[str] = Field(description="Korean card name, or null before reveal")
+    arcana: Optional[Arcana] = Field(description="MAJOR or MINOR, or null before reveal")
+    suit: Optional[TarotSuit] = Field(description="Minor-arcana suit, or null for major and unrevealed cards")
+    rank: Optional[str] = Field(description="Major number or minor rank, or null before reveal")
     direction: Optional[CardDirection] = Field(description="UPRIGHT or REVERSED, or null before reveal")
     image_url: Optional[str] = Field(description="Absolute image URL, or null before reveal")
     keywords: Optional[list[str]] = Field(description="Keywords for the card direction, or null before reveal")
