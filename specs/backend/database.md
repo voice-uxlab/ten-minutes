@@ -108,6 +108,7 @@ erDiagram
         varchar name_ko
         text_array upright_keywords
         text_array reversed_keywords
+        varchar image_path
     }
 
     CONSULTATION_SESSIONS {
@@ -198,10 +199,21 @@ erDiagram
 | `id` | SMALLINT | 필수 | 카드 FK와 서버 덱 생성에 사용하는 0~77 PK |
 | `code` | VARCHAR(64) | 필수 | 이름 변경과 무관한 고유 식별자 |
 | `name_ko` | VARCHAR(64) | 필수 | 카드 선택, 리포트 화면에 표시 |
+| `arcana` | VARCHAR(8) | 필수 | `MAJOR` 또는 `MINOR` |
+| `suit` | VARCHAR(16) | 선택 | 마이너 카드의 `WANDS`, `CUPS`, `SWORDS`, `PENTACLES`. 메이저는 `NULL` |
+| `rank` | VARCHAR(16) | 필수 | 메이저 번호 또는 마이너의 `ACE`, `2`~`10`, `PAGE`, `KNIGHT`, `QUEEN`, `KING` |
 | `upright_keywords` | TEXT[] | 필수 | 정방향 카드 해석 컨텍스트 |
 | `reversed_keywords` | TEXT[] | 필수 | 역방향 카드 해석 컨텍스트 |
+| `image_path` | VARCHAR(255) | 필수 | Storage 버킷 내부의 상대 object path. 호스트와 버전 경로는 API 응답에서 조합 |
 
-MVP는 PoC의 고정된 78장만 사용한다. 모든 행은 활성 카드로 취급한다.
+MVP는 고정된 78장만 사용하며 모든 행을 활성 카드로 취급한다. `code`는 메이저의
+`major-00-fool`, 마이너의 `wands-ace`처럼 카드 분류와 rank가 드러나는 안정적인 값을
+사용한다. `image_path`는 DB ID와 영문 slug로 구성된 `major/00-fool.png` 형태의 상대
+object path를 저장한다.
+
+Supabase Storage의 공개 버킷에는 버전 폴더 아래 `major`, `wands`, `cups`, `swords`,
+`pentacles` 폴더를 둔다. 버킷과 버전 폴더까지의 공개 URL은
+`TAROT_CARD_ASSET_BASE_URL`로 관리하므로 `v2`로 교체할 때 DB 행을 수정하지 않는다.
 
 #### `consultation_sessions`
 

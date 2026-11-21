@@ -1,0 +1,2 @@
+"""Ten Minutes FastAPI backend."""
+
