@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from .config import Settings, get_settings
@@ -45,6 +46,28 @@ def aware(value: datetime) -> datetime:
 
 def frontend_auth_error_url(settings: Settings) -> str:
     return f"{settings.public_web_origin.rstrip('/')}/login?auth_error=failed"
+
+
+def classify_database_operational_error(exc: OperationalError) -> tuple[str, Optional[str], str]:
+    """Return log-safe metadata without recording connection strings or credentials."""
+    original = getattr(exc, "orig", None)
+    message = str(original or exc).lower()
+    patterns = (
+        (("password authentication failed", "authentication failed"), "authentication_failed"),
+        (("tenant or user not found",), "pooler_identity_invalid"),
+        (("could not translate host name", "name or service not known"), "dns_resolution_failed"),
+        (("connection refused",), "connection_refused"),
+        (("timeout", "timed out"), "connection_timeout"),
+        (("max client connections", "too many connections"), "connection_limit"),
+        (("server closed the connection", "connection is closed"), "connection_closed"),
+    )
+    category = "unclassified"
+    for fragments, candidate in patterns:
+        if any(fragment in message for fragment in fragments):
+            category = candidate
+            break
+    sqlstate = getattr(original, "sqlstate", None)
+    return category, sqlstate, type(original).__name__ if original else "unknown"
 
 
 def provider_credentials(provider: str, settings: Settings) -> tuple[str, Optional[str]]:
@@ -158,12 +181,25 @@ def authorize(
                 provider,
                 type(rollback_exc).__name__,
             )
-        logger.error(
-            "OAuth authorization start failed request_id=%s provider=%s exception_type=%s",
-            request_id,
-            provider,
-            type(exc).__name__,
-        )
+        if isinstance(exc, OperationalError):
+            category, sqlstate, dbapi_exception_type = classify_database_operational_error(exc)
+            logger.error(
+                "OAuth authorization start failed request_id=%s provider=%s exception_type=%s "
+                "database_error_category=%s sqlstate=%s dbapi_exception_type=%s",
+                request_id,
+                provider,
+                type(exc).__name__,
+                category,
+                sqlstate or "none",
+                dbapi_exception_type,
+            )
+        else:
+            logger.error(
+                "OAuth authorization start failed request_id=%s provider=%s exception_type=%s",
+                request_id,
+                provider,
+                type(exc).__name__,
+            )
         return RedirectResponse(frontend_auth_error_url(settings), status_code=302)
 
 
