@@ -168,6 +168,44 @@ small,
   object-fit: contain;
   aspect-ratio: 1119/1547;
 }
+.landing:not(.landing-loading) .social-login-button {
+  animation: social-login-appear 280ms ease-out;
+}
+.recent-login-label {
+  margin-inline-start: 8px;
+  color: var(--pink);
+  font-size: 11px;
+}
+.landing-loading .action-stack,
+.landing-loading .login-policies {
+  visibility: hidden;
+}
+.landing-loading .action-stack {
+  position: relative;
+}
+.auth-check-notice {
+  position: absolute;
+  inset: 0 0 auto;
+  visibility: visible;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.5;
+}
+@keyframes social-login-appear {
+  0%, 100% {
+    mask-image: linear-gradient(to bottom, #000 33%, transparent 67%);
+    mask-size: 100% 310%;
+    mask-repeat: no-repeat;
+  }
+  from {
+    opacity: 0;
+    mask-position: center bottom;
+  }
+  to {
+    opacity: 1;
+    mask-position: center top;
+  }
+}
 .login-actions {
   display: grid;
   gap: 10px;
@@ -354,6 +392,60 @@ small,
 .consent input {
   accent-color: var(--pink);
 }
+.consultation-options {
+  min-width: 0;
+  padding: 4px 12px 12px;
+}
+.consultation-options legend {
+  padding-inline: 4px;
+}
+.consultation-options .consent {
+  align-items: center;
+  min-height: 44px;
+  margin-top: 0;
+  font-size: 14px;
+}
+.consultation-options input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.consultation-options .hint {
+  margin-top: 4px;
+}
+.login-policies {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  color: var(--pink);
+}
+.login-recovery {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid #ffb2ce80;
+  border-radius: 16px;
+  background: #262029;
+  color: #fff4f8;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+.login-recovery::after {
+  position: absolute;
+  inset-block-end: -6px;
+  inset-inline-start: calc(50% - 6px);
+  width: 11px;
+  height: 11px;
+  border-inline-end: 1px solid #ffb2ce80;
+  border-block-end: 1px solid #ffb2ce80;
+  background: inherit;
+  transform: rotate(45deg);
+  content: "";
+}
 .intro > .hint {
   text-align: center;
   font-size: 11px;
@@ -374,7 +466,7 @@ small,
   gap: 8px;
   align-items: center;
 }
-input:not([type="checkbox"]) {
+input:not([type="checkbox"], [type="radio"]) {
   width: 100%;
   min-width: 0;
   background: #ffffff12;

@@ -32,6 +32,20 @@ API 키 없이 **시범 통화** 전체 흐름을 실행할 수 있습니다. �
 
 `npm run dev` / `npm start`는 `TTS_PROVIDER=typecast`로 실행합니다. OpenAI 정식 키와 OAuth 비밀 키는 프론트엔드에 전달하지 않습니다. Typecast 속도·목소리는 기존 `/voice-lab` 설정 화면과 서버 설정을 재사용합니다. OAuth 개발자 앱에는 각각 `${APP_ORIGIN}/auth/naver/callback`, `${APP_ORIGIN}/auth/kakao/callback`을 등록해야 합니다. 개인 계정 가입·본인인증과 개발자 앱 키 발급은 별도 절차입니다.
 
+### FastAPI 소셜 로그인 연결
+
+Vite 환경 변수 `VITE_AUTH_API_ORIGIN`에 FastAPI 서버 주소를 지정합니다. `VITE_AUTH_CONSENT_VERSION`에는 서비스에서 승인한 AI 처리 동의 문구의 버전을 지정합니다. 프론트엔드를 실행하거나 빌드하기 전에 설정하며 두 값은 공개 설정입니다.
+
+FastAPI의 `PUBLIC_WEB_ORIGIN`은 실제 프론트엔드 origin과 일치해야 합니다. OAuth 개발자 앱에는 FastAPI의 `BACKEND_ORIGIN`을 기준으로 콜백 URL을 등록합니다. 프론트엔드와 API가 서로 다른 사이트라면 HTTPS 및 `SESSION_COOKIE_SAMESITE=none`, `SESSION_COOKIE_SECURE=true`가 필요하며, 브라우저가 제3자 쿠키를 차단하는 환경에서는 동일 사이트 도메인에서 테스트합니다. 보호된 Preview를 사용할 때는 테스트 브라우저에도 해당 배포 접근 권한이 필요합니다.
+
+`VITE_AUTH_API_ORIGIN`을 비워두면 기존 Node 소셜 로그인 경로를 사용합니다. 닉네임 체험과 상담 API는 기존 앱 서버를 계속 사용합니다.
+
+FastAPI가 `onboarding_required`를 반환하면 첫 로그인 설정에서 기본 호칭(`DEFAULT`) 또는 사용자 닉네임(`CUSTOM`, 최대 40자)을 선택합니다. 동의 확인 후 `PATCH /api/v1/users/me`에 선택한 호칭과 `consent_version`을 저장합니다.
+
+### 로그인 하단 정책 안내
+
+로그인 화면 하단의 이용약관과 개인정보처리방침은 화면 안의 다이얼로그에서 열립니다. 데모 안내 문구는 `src/pages/home.tsx`에서 관리하며 팀이 확정한 본문으로 교체할 수 있습니다.
+
 ## 구성
 
 | 항목 | 구현 |

@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/api/client";
 import { Screens } from "@/pages/screens";
-import { Home, Login, Onboarding, Tickets } from "@/pages/home";
+import { Home, Onboarding, Tickets } from "@/pages/home";
 import { lazy, Suspense } from "react";
 const SessionPage = lazy(() =>
   import("@/pages/session").then((m) => ({ default: m.SessionPage })),
@@ -30,7 +30,7 @@ export function App() {
                 element={<Home key="live-typecast" voiceEngine="live-typecast" />}
               />
               <Route path="/screens" element={<Screens />} />
-              <Route path="/login" element={<Login />} />
+              <Route path="/login" element={<Home key="realtime" />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/sessions/:id" element={<SessionPage />} />
               <Route path="/sessions/:id/report" element={<ReportPage />} />

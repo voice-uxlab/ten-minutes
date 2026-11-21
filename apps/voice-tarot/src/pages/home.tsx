@@ -4,19 +4,38 @@ import {
   prepareAudio,
   discardPreparedAudio,
 } from "@/features/consultation/audio-context";
-import { useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { request, readingRequest } from "@/api/client";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { readingRequest } from "@/api/client";
+import {
+  authOptions,
+  authorizeUrl,
+  consentVersion,
+  logout,
+  saveMemberProfile,
+} from "@/api/auth";
 import { emptyReading, type Session } from "@/api/types";
 import { profile, saveProfile, saveSession } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PolicyDialog } from "@/components/ui/dialog";
 import { Reader, Panel } from "@/components/tarot";
-export function Login() {
+
+const loginAttemptKey = "voice-tarot:login-attempt";
+const recentLoginKey = "voice-tarot:recent-login";
+const loginProviders = { naver: "네이버", kakao: "카카오" } as const;
+type LoginProvider = keyof typeof loginProviders;
+const aiProcessing =
+  "음성 타로 상담을 위해 내 음성을 OpenAI에, AI 답변 텍스트를 Typecast에 전송하여 처리하는 데 동의합니다.";
+
+function loginProvider(provider: string | null): LoginProvider | null {
+  return provider === "naver" || provider === "kakao" ? provider : null;
+}
+
+function LandingIntro() {
   return (
-    <section className="page landing">
+    <>
       <p className="invitation">
         오늘 고민은 언니가 들어줄게.
         <br />
@@ -27,37 +46,172 @@ export function Login() {
         src="/assets/home-art.png"
         alt="전화기를 든 캐릭터와 은빛 VOICE TAROT 로고"
       />
+    </>
+  );
+}
+
+function AuthCheckNotice() {
+  const [showNotice, setShowNotice] = useState(false);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const noticeTimer = window.setTimeout(() => setShowNotice(true), 3000);
+    const deadlineTimer = window.setTimeout(() => {
+      void queryClient.cancelQueries({
+        queryKey: authOptions.queryKey,
+        exact: true,
+      });
+      navigate("/login", { replace: true });
+    }, 8000);
+    return () => {
+      window.clearTimeout(noticeTimer);
+      window.clearTimeout(deadlineTimer);
+    };
+  }, [navigate, queryClient]);
+
+  return (
+    <p className="auth-check-notice" role="status">
+      {showNotice && (
+        <>
+          로그인 상태를 확인 중이에요.
+          <br />
+          잠시만 기다려 주세요.
+        </>
+      )}
+    </p>
+  );
+}
+
+function Login({ checking = false }: { checking?: boolean }) {
+  const { pathname, search, hash } = useLocation();
+  const navigate = useNavigate();
+  const [authError, setAuthError] = useState(() =>
+    new URLSearchParams(search).get("auth_error"),
+  );
+  const [attempt, setAttempt] = useState(() =>
+    loginProvider(sessionStorage.getItem(loginAttemptKey)),
+  );
+  const recentLogin = loginProvider(localStorage.getItem(recentLoginKey));
+  useEffect(() => {
+    if (checking) return;
+    const consumeAttempt = () => {
+      const provider = loginProvider(sessionStorage.getItem(loginAttemptKey));
+      if (!provider) return;
+      setAttempt(provider);
+      sessionStorage.removeItem(loginAttemptKey);
+    };
+    consumeAttempt();
+    window.addEventListener("pageshow", consumeAttempt);
+    return () => window.removeEventListener("pageshow", consumeAttempt);
+  }, [checking]);
+  useEffect(() => {
+    if (pathname.toLowerCase().replace(/\/+$/, "") !== "/login") return;
+    const params = new URLSearchParams(search);
+    const error = params.get("auth_error");
+    if (error === null) return;
+    setAuthError(error);
+    params.delete("auth_error");
+    navigate({ pathname, search: params.toString(), hash }, { replace: true });
+  }, [hash, navigate, pathname, search]);
+  function startLogin(provider: LoginProvider) {
+    setAttempt(null);
+    setAuthError(null);
+    sessionStorage.setItem(loginAttemptKey, provider);
+  }
+  return (
+    <section
+      className={checking ? "page landing landing-loading" : "page landing"}
+    >
+      <LandingIntro />
       <div className="action-stack">
-        <a className="button glass" href="/auth/naver">
-          네이버로 시작하기
-        </a>
-        <a className="button glass" href="/auth/kakao">
-          카카오로 시작하기
-        </a>
+        {checking && <AuthCheckNotice />}
+        {(["naver", "kakao"] as const).map((provider) => {
+          const showRecovery =
+            attempt === provider ||
+            (!attempt && authError && provider === "naver");
+          return (
+            <a
+              key={provider}
+              className="button glass social-login-button"
+              href={authorizeUrl(provider)}
+              onClick={() => startLogin(provider)}
+              aria-describedby={
+                showRecovery ? "login-recovery-message" : undefined
+              }
+            >
+              {loginProviders[provider]}로 시작하기
+              {recentLogin === provider && (
+                <span className="recent-login-label">최근 로그인</span>
+              )}
+            </a>
+          );
+        })}
+        {(attempt || authError) && (
+          <p
+            className="login-recovery"
+            id="login-recovery-message"
+            role="alert"
+          >
+            <strong>
+              {authError === "cancelled"
+                ? "로그인을 취소했어요."
+                : "소셜 로그인을 완료할 수 없습니다."}
+            </strong>
+            <span>다시 시도하거나 닉네임으로 체험할 수 있습니다.</span>
+          </p>
+        )}
         <Button asChild variant="ghost">
-          <Link to="/onboarding">닉네임으로 체험하기</Link>
+          <Link
+            to="/onboarding"
+            onClick={() => sessionStorage.removeItem(loginAttemptKey)}
+          >
+            닉네임으로 체험하기
+          </Link>
         </Button>
       </div>
-      {new URLSearchParams(location.search).has("auth_error") ? (
-        <p role="alert">
-          소셜 로그인 설정을 확인해 주세요. 닉네임으로도 체험할 수 있어요.
-        </p>
-      ) : null}
-      <PolicyDialog title="이용 안내">
-        타로는 선택을 돕는 참고용 상담이에요. 이용권은 실제 결제가 없는 데모
-        기능이에요.
-      </PolicyDialog>
-      <PolicyDialog title="개인정보 및 음성 처리 안내">
-        상담 음성은 OpenAI로, 답변 텍스트는 Typecast로 전송해요. 상담 요약은 이
-        브라우저에, 질문과 카드는 이어보기를 위해 앱 서버에 보관돼요. 소셜
-        로그인은 회원 식별자와 닉네임을 사용해요.
-      </PolicyDialog>
+      <div className="login-policies">
+        <PolicyDialog title="이용약관">
+          데모 이용 안내입니다. 타로는 선택을 돕는 참고용 상담이에요. 데모
+          이용권에는 실제 결제가 없어요.
+        </PolicyDialog>
+        <span aria-hidden="true">·</span>
+        <PolicyDialog title="개인정보처리방침">
+          데모 개인정보 처리 안내입니다. 상담 음성은 OpenAI에, AI 답변 텍스트는
+          Typecast에 전송해요. 상담 요약은 이 브라우저에, 질문과 카드는
+          이어보기를 위해 앱 서버에 보관해요.
+        </PolicyDialog>
+      </div>
     </section>
   );
 }
 export function Onboarding() {
-  const [nick, setNick] = useState(profile().nick),
+  const member =
+    new URLSearchParams(useLocation().search).get("mode") === "member";
+  const [nick, setNick] = useState(() => (member ? "" : profile().nick)),
     navigate = useNavigate();
+  const [customName, setCustomName] = useState(false);
+  const auth = useQuery({ ...authOptions, enabled: member });
+  const queryClient = useQueryClient();
+  const saveMember = useMutation({
+    mutationFn: saveMemberProfile,
+    onSuccess: (user) => {
+      queryClient.setQueryData(authOptions.queryKey, user);
+      navigate("/", { replace: true });
+    },
+  });
+  if (member && auth.isPending) {
+    return <p role="status">로그인 상태를 확인하고 있어요.</p>;
+  }
+  if (member && auth.isError) {
+    return (
+      <p role="alert">
+        로그인 상태를 확인하지 못했어요. <Link to="/login">로그인 화면</Link>
+      </p>
+    );
+  }
+  if (member && !auth.data) return <Navigate to="/login" replace />;
+  if (member && !auth.data?.onboarding_required)
+    return <Navigate to="/" replace />;
   return (
     <section className="page">
       <h1>만나서 반가워, 공주야.</h1>
@@ -65,36 +219,88 @@ export function Onboarding() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            if (member) {
+              if (saveMember.isPending || (customName && !nick.trim())) return;
+              saveMember.mutate(
+                customName
+                  ? { addressing_mode: "CUSTOM", nickname: nick.trim() }
+                  : { addressing_mode: "DEFAULT", nickname: null },
+              );
+              return;
+            }
             if (!nick.trim()) return;
             saveProfile({ ...profile(), nick: nick.trim() });
             navigate("/");
           }}
         >
-          <label htmlFor="nick">닉네임</label>
-          <Input
-            id="nick"
-            value={nick}
-            onChange={(e) => setNick(e.target.value)}
-            maxLength={20}
-            required
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() =>
-              setNick(
-                ["새벽의 별", "빛나는 달", "당당한 장미"][
-                  Math.floor(Math.random() * 3)
-                ],
-              )
-            }
-          >
-            랜덤 닉네임 ⚄
-          </Button>
+          {member ? (
+            <fieldset>
+              <legend>호칭 선택</legend>
+              <label className="consent">
+                <input
+                  type="radio"
+                  name="addressing-mode"
+                  checked={!customName}
+                  onChange={() => setCustomName(false)}
+                />{" "}
+                기본 호칭 (공주)
+              </label>
+              <label className="consent">
+                <input
+                  type="radio"
+                  name="addressing-mode"
+                  checked={customName}
+                  onChange={() => setCustomName(true)}
+                />{" "}
+                닉네임으로 불리기
+              </label>
+            </fieldset>
+          ) : null}
+          {!member || customName ? (
+            <>
+              <label htmlFor="nick">닉네임</label>
+              <Input
+                id="nick"
+                value={nick}
+                onChange={(e) => setNick(e.target.value)}
+                maxLength={member ? 40 : 20}
+                required
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  setNick(
+                    ["새벽의 별", "빛나는 달", "당당한 장미"][
+                      Math.floor(Math.random() * 3)
+                    ],
+                  )
+                }
+              >
+                랜덤 닉네임 ⚄
+              </Button>
+            </>
+          ) : null}
           <label className="consent">
             <input type="checkbox" required /> 만 14세 이상이에요.
           </label>
-          <Button size="wide">레나 만나러 가기</Button>
+          {member ? (
+            <label className="consent">
+              <input type="checkbox" required /> {aiProcessing}
+            </label>
+          ) : null}
+          {member && !consentVersion ? (
+            <p role="alert">회원 가입 설정을 확인해 주세요.</p>
+          ) : null}
+          {saveMember.error ? (
+            <p role="alert">{saveMember.error.message}</p>
+          ) : null}
+          <Button
+            size="wide"
+            disabled={member && (saveMember.isPending || !consentVersion)}
+          >
+            {saveMember.isPending ? "저장 중…" : "레나 만나러 가기"}
+          </Button>
         </form>
       </Panel>
     </section>
@@ -115,13 +321,27 @@ export function Home({
     [error, setError] = useState(""),
     [exporting, setExporting] = useState(false),
     [exportStatus, setExportStatus] = useState("");
-  const auth = useQuery({
-    queryKey: ["auth"],
-    queryFn: () =>
-      request<{
-        user?: { nickname: string };
-        providers: Record<string, boolean>;
-      }>("/auth/me"),
+  const { pathname, search } = useLocation();
+  const isLogin = pathname.toLowerCase().replace(/\/+$/, "") === "/login";
+  const queryClient = useQueryClient();
+  const auth = useQuery({ ...authOptions, enabled: !isLogin });
+  useEffect(() => {
+    if (isLogin || !auth.data || new URLSearchParams(search).has("auth_error"))
+      return;
+    const provider =
+      loginProvider(auth.data.provider) ??
+      loginProvider(sessionStorage.getItem(loginAttemptKey));
+    if (provider) localStorage.setItem(recentLoginKey, provider);
+    sessionStorage.removeItem(loginAttemptKey);
+  }, [auth.data, isLogin, search]);
+  const signOut = useMutation({
+    mutationFn: logout,
+    onSuccess: () => {
+      saveProfile({ ...profile(), nick: "" });
+      setP(profile());
+      queryClient.setQueryData(authOptions.queryKey, null);
+      navigate("/login", { replace: true });
+    },
   });
   const starting = useRef(false);
   const create = useMutation({
@@ -165,8 +385,22 @@ export function Home({
       setError(e instanceof Error ? e.message : "음성을 준비하지 못했어요.");
     }
   }
-  const nick = auth.data?.user?.nickname || p.nick;
-  if (!nick && !auth.isPending) return <Navigate to="/login" replace />;
+  const hasAuthError = new URLSearchParams(search).has("auth_error");
+  if (!isLogin && !hasAuthError && auth.data?.onboarding_required) {
+    return <Navigate to="/onboarding?mode=member" replace />;
+  }
+  const nick = auth.data ? auth.data.nickname || "공주" : p.nick;
+  if (isLogin || hasAuthError || !nick) {
+    const checking = !isLogin && !hasAuthError && auth.isPending;
+    return (
+      <>
+        <Login checking={checking} />
+        {!isLogin && !checking && (
+          <Navigate to={`/login${hasAuthError ? search : ""}`} replace />
+        )}
+      </>
+    );
+  }
   async function allowMic() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -181,7 +415,7 @@ export function Home({
   }
   return (
     <section className="page intro">
-      <fieldset className="panel" disabled={create.isPending}>
+      <fieldset className="panel consultation-options" disabled={create.isPending}>
         <legend>상담 버전 선택</legend>
         <label className="consent">
           <input
@@ -207,7 +441,7 @@ export function Home({
           둘 다 레나의 목소리 · 1.3배속이에요. 새 통화에 선택한 버전을 적용해요.
         </p>
       </fieldset>
-      <fieldset className="panel" disabled={create.isPending}>
+      <fieldset className="panel consultation-options" disabled={create.isPending}>
         <legend>테스트 · 페르소나 선택</legend>
         {personas.map((persona) => (
           <label className="consent" key={persona.id}>
@@ -227,20 +461,17 @@ export function Home({
       </fieldset>
       <header>
         <Link to="/login">‹ HOME</Link>
-        {auth.data?.user ? (
+        {auth.data ? (
           <Button
             variant="ghost"
-            onClick={async () => {
-              await request("/auth/logout", {});
-              saveProfile({ ...p, nick: "" });
-              setP(profile());
-              location.assign("/login");
-            }}
+            disabled={signOut.isPending}
+            onClick={() => signOut.mutate()}
           >
             로그아웃
           </Button>
         ) : null}
       </header>
+      {signOut.error ? <p role="alert">{signOut.error.message}</p> : null}
       <Reader />
       <Panel title="message from 언니" className="greeting-panel">
         <h1>{nick || "공주"}야, 안녕!</h1>
@@ -294,7 +525,7 @@ export function Home({
           />{" "}
           {voiceEngine === "live-noeul"
             ? "음성을 OpenAI에 전송하여 음성 상담을 진행하는 데 동의해요."
-            : "음성을 OpenAI에, 답변 텍스트를 타입캐스트에 전송하는 데 동의해요."}
+            : aiProcessing}
         </label>
       </Panel>
       <Button
