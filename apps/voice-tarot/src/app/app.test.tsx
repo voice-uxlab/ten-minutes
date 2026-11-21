@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import {
+  act,
   render,
   screen,
   waitFor,
@@ -43,15 +44,70 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await rm(dir, { recursive: true, force: true });
 });
+test("home silently checks auth and opens login when the lookup fails", async () => {
+  vi.mocked(fetch).mockImplementation(async () =>
+    Response.json({ error: "Unavailable" }, { status: 500 }),
+  );
+  render(<App />);
+  const art = screen.getByRole("img", { name: /VOICE TAROT/ });
+  expect(art.closest(".landing-loading")).toBeTruthy();
+  expect(screen.queryByText("로그인 상태를 확인하고 있어요.")).toBeNull();
+  await waitFor(
+    () => expect(window.location.pathname).toBe("/login"),
+    { timeout: 3000 },
+  );
+  expect(screen.getByRole("link", { name: "닉네임으로 체험하기" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: /VOICE TAROT/ })).toBe(art);
+  expect(art.closest(".landing-loading")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test.each(["responds", "times out"])("slow auth lookup shows a notice until it %s", async (outcome) => {
+  vi.useFakeTimers();
+  try {
+    let respond: ((response: Response) => void) | undefined;
+    let signal: AbortSignal | null | undefined;
+    vi.mocked(fetch).mockImplementation((_path, options) => {
+      signal = options?.signal;
+      return new Promise((resolve) => { respond = resolve; });
+    });
+    render(<App />);
+    const notice = "로그인 상태를 확인 중이에요. 잠시만 기다려 주세요.";
+
+    await act(() => vi.advanceTimersByTimeAsync(2999));
+    expect(screen.queryByText(notice)).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(window.location.pathname).toBe("/");
+
+    if (outcome === "responds") {
+      await act(async () => {
+        respond?.(Response.json({ user: null }));
+        await vi.advanceTimersByTimeAsync(1);
+      });
+    } else {
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+      expect(signal?.aborted).toBe(true);
+    }
+    expect(window.location.pathname).toBe("/login");
+    expect(screen.queryByText(notice)).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("cancelled social login offers retry and nickname experience", async () => {
   sessionStorage.setItem("voice-tarot:login-attempt", "naver");
   history.replaceState({}, "", "/?auth_error=cancelled");
   render(<App />);
   expect((await screen.findByRole("alert")).textContent).toContain("로그인을 취소했어요.");
-  const retry = screen.getByRole("link", { name: "네이버 로그인 다시 시도" });
-  expect(retry.getAttribute("href")).toBe(
-    screen.getByRole("link", { name: "네이버로 시작하기" }).getAttribute("href"),
-  );
+  const naver = screen.getByRole("link", { name: "네이버로 시작하기" });
+  const alert = screen.getByRole("alert");
+  expect(naver.getAttribute("aria-describedby")).toBe(alert.id);
+  expect(alert.nextElementSibling).toBe(screen.getByRole("link", { name: "닉네임으로 체험하기" }));
+  expect(screen.queryByRole("link", { name: /로그인 다시 시도/ })).toBeNull();
+  await waitFor(() => expect(window.location.search).toBe(""));
+  expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
   await userEvent.click(screen.getByRole("link", { name: "닉네임으로 체험하기" }));
   expect(await screen.findByLabelText("닉네임")).toBeTruthy();
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
@@ -68,7 +124,28 @@ test("returning to the login page after leaving for OAuth restores retry", async
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("소셜 로그인을 완료할 수 없습니다.");
   expect(alert.textContent).toContain("다시 시도하거나 닉네임으로 체험할 수 있습니다.");
-  expect(screen.getByRole("link", { name: "카카오 로그인 다시 시도" }).getAttribute("href")).toBe(kakao.getAttribute("href"));
+  expect(alert.nextElementSibling).toBe(screen.getByRole("link", { name: "닉네임으로 체험하기" }));
+  expect(kakao.getAttribute("aria-describedby")).toBe(alert.id);
+  expect(screen.queryByRole("link", { name: /로그인 다시 시도/ })).toBeNull();
+  expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
+  cleanup();
+  render(<App />);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a confirmed social login is marked on later visits to login", async () => {
+  sessionStorage.setItem("voice-tarot:login-attempt", "kakao");
+  vi.mocked(fetch).mockImplementation(async () =>
+    Response.json({ user: { nickname: "테스트 공주", provider: "kakao" } }),
+  );
+  const app = render(<App />);
+  await screen.findByRole("heading", { name: "테스트 공주야, 안녕!" });
+  expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
+  app.unmount();
+  history.replaceState({}, "", "/login");
+  render(<App />);
+  expect(screen.getByRole("link", { name: /카카오로 시작하기.*최근 로그인/ })).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("React StrictMode: onboard → demo → partial picks → reveals → notes/report; URL reload creates no session", async () => {

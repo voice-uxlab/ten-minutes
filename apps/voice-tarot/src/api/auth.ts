@@ -1,3 +1,4 @@
+import type { QueryFunctionContext } from "@tanstack/react-query";
 import { request } from "./client";
 
 const origin = import.meta.env.VITE_AUTH_API_ORIGIN?.trim().replace(/\/+$/, "");
@@ -16,7 +17,7 @@ type MemberProfile = {
 type AddressingPreference =
   | { addressing_mode: "DEFAULT"; nickname: null }
   | { addressing_mode: "CUSTOM"; nickname: string };
-type AuthUser = { nickname: string | null; onboarding_required: boolean };
+type AuthUser = Pick<MemberProfile, "nickname" | "onboarding_required" | "provider">;
 
 export function authorizeUrl(provider: "naver" | "kakao") {
   return origin ? `${origin}/auth/${provider}/authorize` : `/auth/${provider}`;
@@ -28,14 +29,20 @@ async function authRequest(path: string, options?: RequestInit) {
 
 export const authOptions = {
   queryKey: ["auth"],
-  queryFn: async (): Promise<AuthUser | null> => {
+  queryFn: async ({ signal }: QueryFunctionContext): Promise<AuthUser | null> => {
     if (!origin) {
-      const { user } = await request<{ user: { nickname: string } | null }>(
+      const { user } = await request<{
+        user: { nickname: string; provider?: string } | null;
+      }>(
         "/auth/me",
+        undefined,
+        signal,
       );
-      return user ? { ...user, onboarding_required: false } : null;
+      return user
+        ? { ...user, provider: user.provider ?? null, onboarding_required: false }
+        : null;
     }
-    const response = await authRequest(userPath);
+    const response = await authRequest(userPath, { signal });
     if (response.status === 401) return null;
     if (!response.ok) throw new Error("로그인 상태를 확인하지 못했어요.");
     const member: MemberProfile = await response.json();

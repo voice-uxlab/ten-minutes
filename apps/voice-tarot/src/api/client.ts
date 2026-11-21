@@ -6,9 +6,14 @@ export const queryClient = new QueryClient({
     mutations: { retry: false },
   },
 });
-export async function request<T>(path: string, body?: unknown): Promise<T> {
+export async function request<T>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(path, {
     credentials: "same-origin",
+    signal,
     ...(body === undefined
       ? {}
       : {
