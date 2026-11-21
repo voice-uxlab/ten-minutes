@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -18,6 +19,7 @@ from .openapi import PUBLIC_RESPONSES, error_response
 
 
 router = APIRouter(tags=["auth"], responses=PUBLIC_RESPONSES)
+logger = logging.getLogger(__name__)
 
 PROVIDERS = {
     "kakao": {
@@ -39,6 +41,10 @@ def token_hash(value: str) -> str:
 
 def aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def frontend_auth_error_url(settings: Settings) -> str:
+    return f"{settings.public_web_origin.rstrip('/')}/login?auth_error=failed"
 
 
 def provider_credentials(provider: str, settings: Settings) -> tuple[str, Optional[str]]:
@@ -83,37 +89,82 @@ def current_user(user: Optional[User] = Depends(current_user_optional)) -> User:
     "/auth/{provider}/authorize",
     status_code=302,
     summary="Start social login",
-    description="Stores a single-use OAuth `state` value and redirects to the Kakao or Naver authorization page.",
+    description=(
+        "Stores a single-use OAuth `state` value and redirects to the Kakao or Naver authorization page. "
+        "If login initialization fails, redirects to the frontend login page with `auth_error=failed`."
+    ),
     responses={
-        302: {"description": "Redirects to the provider authorization page in the `Location` header"},
+        302: {
+            "description": (
+                "Redirects to the provider authorization page, or to the frontend login page when "
+                "initialization fails"
+            )
+        },
         404: error_response(
             404,
             examples={"provider_not_found": ("AUTH_PROVIDER_NOT_FOUND", "The authentication provider is not supported.")},
         ),
         503: error_response(
             503,
-            examples={"provider_not_configured": ("AUTH_PROVIDER_NOT_CONFIGURED", "The authentication provider is not configured.")},
+            examples={
+                "provider_not_configured": (
+                    "AUTH_PROVIDER_NOT_CONFIGURED",
+                    "The authentication provider is not configured.",
+                )
+            },
         ),
     },
 )
 def authorize(
+    request: Request,
     provider: str = Path(description="OAuth provider: `kakao` or `naver`", examples=["kakao"]),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    client_id, _ = provider_credentials(provider, settings)
-    raw_state = secrets.token_urlsafe(32)
-    db.add(
-        OAuthAttempt(
-            provider=provider,
-            state_hash=token_hash(raw_state),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.oauth_state_ttl_seconds),
+    if provider not in PROVIDERS:
+        raise APIError(404, "AUTH_PROVIDER_NOT_FOUND", "The authentication provider is not supported.")
+    try:
+        client_id, _ = provider_credentials(provider, settings)
+        raw_state = secrets.token_urlsafe(32)
+        db.add(
+            OAuthAttempt(
+                provider=provider,
+                state_hash=token_hash(raw_state),
+                expires_at=datetime.now(timezone.utc)
+                + timedelta(seconds=settings.oauth_state_ttl_seconds),
+            )
         )
-    )
-    db.commit()
-    redirect_uri = f"{settings.backend_origin.rstrip('/')}/auth/{provider}/callback"
-    params = {"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri, "state": raw_state}
-    return RedirectResponse(f"{PROVIDERS[provider]['authorize']}?{urlencode(params)}", status_code=302)
+        db.commit()
+        redirect_uri = f"{settings.backend_origin.rstrip('/')}/auth/{provider}/callback"
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "state": raw_state,
+        }
+        return RedirectResponse(
+            f"{PROVIDERS[provider]['authorize']}?{urlencode(params)}", status_code=302
+        )
+    except APIError:
+        raise
+    except Exception as exc:
+        request_id = getattr(request.state, "request_id", "unknown")
+        try:
+            db.rollback()
+        except Exception as rollback_exc:
+            logger.error(
+                "OAuth authorization rollback failed request_id=%s provider=%s exception_type=%s",
+                request_id,
+                provider,
+                type(rollback_exc).__name__,
+            )
+        logger.error(
+            "OAuth authorization start failed request_id=%s provider=%s exception_type=%s",
+            request_id,
+            provider,
+            type(exc).__name__,
+        )
+        return RedirectResponse(frontend_auth_error_url(settings), status_code=302)
 
 
 async def exchange_profile(

@@ -205,6 +205,55 @@ def test_oauth_authorize_uses_backend_origin(db_session):
     assert query["redirect_uri"] == ["http://localhost:8000/auth/kakao/callback"]
 
 
+def test_oauth_authorize_returns_503_when_provider_is_not_configured(db_session):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings, get_settings
+    from app.main import app
+
+    settings = Settings(
+        naver_client_id=None,
+        database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        with TestClient(app, follow_redirects=False) as client:
+            response = client.get("/auth/naver/authorize")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AUTH_PROVIDER_NOT_CONFIGURED"
+
+
+def test_oauth_authorize_redirects_to_frontend_when_database_fails(db_session, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.exc import OperationalError
+
+    from app.config import Settings, get_settings
+    from app.main import app
+
+    settings = Settings(
+        public_web_origin="https://web.example.com/",
+        naver_client_id="test-client-id",
+        database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
+    )
+
+    def fail_commit():
+        raise OperationalError("INSERT", {}, RuntimeError("database unavailable"))
+
+    monkeypatch.setattr(db_session, "commit", fail_commit)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        with TestClient(app, follow_redirects=False) as client:
+            response = client.get("/auth/naver/authorize")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://web.example.com/login?auth_error=failed"
+
+
 def test_logout_uses_cross_site_cookie_settings(authenticated_client):
     from app.config import Settings, get_settings
     from app.main import app
