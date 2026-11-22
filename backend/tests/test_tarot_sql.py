@@ -13,3 +13,6 @@ def test_supabase_tarot_sql_matches_the_deck_source():
     assert len({card_code(card[0]) for card in DECK}) == 78
     assert sql == render_sql()
     assert sql.count("\n    (") == 78
+    assert "DROP COLUMN IF EXISTS reversed_keywords" in sql
+    assert "ARRAY[]::text[]" not in sql
+    assert "ENABLE ROW LEVEL SECURITY" in sql

@@ -106,9 +106,6 @@ class TarotCard(Base):
     upright_keywords: Mapped[list[str]] = mapped_column(
         JSON().with_variant(ARRAY(String()), "postgresql")
     )
-    reversed_keywords: Mapped[list[str]] = mapped_column(
-        JSON().with_variant(ARRAY(String()), "postgresql")
-    )
     image_path: Mapped[str] = mapped_column(String(255))
 
 

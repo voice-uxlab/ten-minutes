@@ -9,7 +9,7 @@ from .models import TarotCard
 def seed_tarot_cards(db: Session) -> int:
     existing_ids = set(db.scalars(select(TarotCard.id)))
     cards = []
-    for card_id, name, upright, reversed_keywords in DECK:
+    for card_id, name, upright in DECK:
         if card_id in existing_ids:
             continue
         taxonomy = card_taxonomy(card_id)
@@ -22,7 +22,6 @@ def seed_tarot_cards(db: Session) -> int:
                 suit=taxonomy.suit,
                 rank=taxonomy.rank,
                 upright_keywords=list(upright),
-                reversed_keywords=list(reversed_keywords),
                 image_path=card_image_path(card_id),
             )
         )

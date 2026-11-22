@@ -34,6 +34,8 @@ def test_migrated_postgresql_database_is_ready():
                 "ACE",
             )
             assert ace_of_wands.code == "wands-ace"
+            assert ace_of_wands.upright_keywords
+            assert not hasattr(ace_of_wands, "reversed_keywords")
             assert ace_of_wands.image_path == "wands/22-ace.png"
     finally:
         engine.dispose()

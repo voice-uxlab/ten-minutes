@@ -17,14 +17,14 @@ def sql_array(values: tuple[str, ...]) -> str:
 
 
 def render_row(card: tuple) -> str:
-    card_id, name, upright, reversed_keywords = card
+    card_id, name, upright = card
     taxonomy = card_taxonomy(card_id)
     suit = "NULL" if taxonomy.suit is None else sql_literal(taxonomy.suit)
     return (
         "    ("
         f"{card_id}, {sql_literal(card_code(card_id))}, {sql_literal(name)}, "
         f"{sql_literal(taxonomy.arcana)}, {suit}, {sql_literal(taxonomy.rank)}, "
-        f"{sql_array(upright)}, {sql_array(reversed_keywords)}"
+        f"{sql_array(upright)}"
         ")"
     )
 
@@ -33,7 +33,7 @@ def render_sql() -> str:
     rows = ",\n".join(render_row(card) for card in DECK)
     return f"""-- Ten Minutes tarot card reference data for Supabase/PostgreSQL.
 -- The Korean keywords are project-curated summaries of conventional
--- Rider-Waite-Smith upright and reversed interpretations.
+-- Rider-Waite-Smith upright interpretations.
 -- This file is idempotent: it can be safely executed more than once.
 
 BEGIN;
@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS public.tarot_cards (
     suit VARCHAR(16),
     rank VARCHAR(16) NOT NULL,
     upright_keywords TEXT[] NOT NULL,
-    reversed_keywords TEXT[] NOT NULL,
     CONSTRAINT ck_tarot_cards_id CHECK (id BETWEEN 0 AND 77),
     CONSTRAINT ck_tarot_cards_arcana CHECK (arcana IN ('MAJOR', 'MINOR')),
     CONSTRAINT ck_tarot_cards_suit CHECK (
@@ -56,6 +55,11 @@ CREATE TABLE IF NOT EXISTS public.tarot_cards (
     )
 );
 
+ALTER TABLE public.tarot_cards
+    DROP COLUMN IF EXISTS reversed_keywords;
+
+ALTER TABLE public.tarot_cards ENABLE ROW LEVEL SECURITY;
+
 INSERT INTO public.tarot_cards (
     id,
     code,
@@ -63,8 +67,7 @@ INSERT INTO public.tarot_cards (
     arcana,
     suit,
     rank,
-    upright_keywords,
-    reversed_keywords
+    upright_keywords
 )
 VALUES
 {rows}
@@ -74,8 +77,7 @@ ON CONFLICT (id) DO UPDATE SET
     arcana = EXCLUDED.arcana,
     suit = EXCLUDED.suit,
     rank = EXCLUDED.rank,
-    upright_keywords = EXCLUDED.upright_keywords,
-    reversed_keywords = EXCLUDED.reversed_keywords;
+    upright_keywords = EXCLUDED.upright_keywords;
 
 COMMIT;
 

@@ -107,7 +107,6 @@ erDiagram
         varchar code UK
         varchar name_ko
         text_array upright_keywords
-        text_array reversed_keywords
         varchar image_path
     }
 
@@ -203,7 +202,6 @@ erDiagram
 | `suit` | VARCHAR(16) | 선택 | 마이너 카드의 `WANDS`, `CUPS`, `SWORDS`, `PENTACLES`. 메이저는 `NULL` |
 | `rank` | VARCHAR(16) | 필수 | 메이저 번호 또는 마이너의 `ACE`, `2`~`10`, `PAGE`, `KNIGHT`, `QUEEN`, `KING` |
 | `upright_keywords` | TEXT[] | 필수 | 정방향 카드 해석 컨텍스트 |
-| `reversed_keywords` | TEXT[] | 필수 | 역방향 카드 해석 컨텍스트 |
 | `image_path` | VARCHAR(255) | 필수 | Storage 버킷 내부의 상대 object path. 호스트와 버전 경로는 API 응답에서 조합 |
 
 MVP는 고정된 78장만 사용하며 모든 행을 활성 카드로 취급한다. `code`는 메이저의
@@ -225,7 +223,7 @@ Supabase Storage의 공개 버킷에는 버전 폴더 아래 `major`, `wands`, `
 | `expected_card_count` | SMALLINT | 필수 | 상담 생성 시 서버가 확정한 카드 수. MVP default `3` |
 | `question` | VARCHAR(500) | 선택 | 카드 선택을 확정할 때부터 필수 |
 | `positions` | JSONB | 선택 | 카드 선택을 확정할 때부터 필수. 문자열 수가 `expected_card_count`와 같아야 함 |
-| `deck_snapshot` | JSONB | 필수 | 상담 생성 시 고정한 78개 `{card_id, direction}` 배열. 재시도에도 같은 카드 결과를 반환하기 위해 저장 |
+| `deck_snapshot` | JSONB | 필수 | 상담 생성 시 고정한 78개 `{card_id}` 배열. 재시도에도 같은 카드 결과를 반환하기 위해 저장 |
 | `end_reason` | VARCHAR(32) | 선택 | 상담이 `ENDED`가 될 때 필수 |
 | `created_at` | TIMESTAMPTZ | 필수 | 상담 생성 시각과 목록 정렬 기준 |
 | `connected_at` | TIMESTAMPTZ | 선택 | 최초 `REALTIME_CONNECTED` 이벤트 수신 시 저장 |
@@ -244,7 +242,7 @@ Supabase Storage의 공개 버킷에는 버전 폴더 아래 `major`, `wands`, `
 | `card_id` | SMALLINT | 필수 | 선택된 카드 FK |
 | `picked_number` | SMALLINT | 필수 | 사용자가 선택한 1~78 번호 |
 | `position_name` | VARCHAR(100) | 필수 | 해당 카드가 해석할 자리 이름 |
-| `direction` | VARCHAR(8) | 필수 | `UPRIGHT` 또는 `REVERSED` |
+| `direction` | VARCHAR(8) | 필수 | `UPRIGHT`. 기존 응답 계약 호환을 위해 유지 |
 | `selected_at` | TIMESTAMPTZ | 필수 | 카드 선택 확정 시각 |
 | `revealed_at` | TIMESTAMPTZ | 선택 | 해당 slot 공개 API가 성공하면 저장 |
 

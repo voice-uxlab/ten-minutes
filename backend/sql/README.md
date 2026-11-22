@@ -11,8 +11,12 @@ not exist and upserts all 78 tarot cards. It is safe to run repeatedly.
 4. Confirm the result row reports `78 / 22 / 56` for total, major, and minor
    cards.
 
-The SQL uses PostgreSQL `TEXT[]` columns for upright and reversed keywords,
-matching the backend SQLAlchemy model and Alembic schema.
+The SQL stores upright keywords in a PostgreSQL `TEXT[]` column. Tarot cards
+are always upright, and an existing `reversed_keywords` column is removed when
+the script is applied.
+Row-level security is enabled without an `anon` or `authenticated` policy, so
+the table remains available to the backend's direct database connection but is
+not exposed through the Supabase Data API.
 
 ## Regenerate
 
