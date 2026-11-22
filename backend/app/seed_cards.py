@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal
-from .deck import DECK, card_code, card_image_path, card_taxonomy
+from .deck import DECK, card_code, card_taxonomy
 from .models import TarotCard
 
 
@@ -23,7 +23,6 @@ def seed_tarot_cards(db: Session) -> int:
                 rank=taxonomy.rank,
                 upright_keywords=list(upright),
                 reversed_keywords=list(reversed_keywords),
-                image_path=card_image_path(card_id),
             )
         )
     if cards:

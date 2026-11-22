@@ -108,7 +108,6 @@ erDiagram
         varchar name_ko
         text_array upright_keywords
         text_array reversed_keywords
-        varchar image_path
     }
 
     CONSULTATION_SESSIONS {
@@ -204,16 +203,11 @@ erDiagram
 | `rank` | VARCHAR(16) | 필수 | 메이저 번호 또는 마이너의 `ACE`, `2`~`10`, `PAGE`, `KNIGHT`, `QUEEN`, `KING` |
 | `upright_keywords` | TEXT[] | 필수 | 정방향 카드 해석 컨텍스트 |
 | `reversed_keywords` | TEXT[] | 필수 | 역방향 카드 해석 컨텍스트 |
-| `image_path` | VARCHAR(255) | 필수 | Storage 버킷 내부의 상대 object path. 호스트와 버전 경로는 API 응답에서 조합 |
 
 MVP는 고정된 78장만 사용하며 모든 행을 활성 카드로 취급한다. `code`는 메이저의
 `major-00-fool`, 마이너의 `wands-ace`처럼 카드 분류와 rank가 드러나는 안정적인 값을
-사용한다. `image_path`는 DB ID와 영문 slug로 구성된 `major/00-fool.png` 형태의 상대
-object path를 저장한다.
-
-Supabase Storage의 공개 버킷에는 버전 폴더 아래 `major`, `wands`, `cups`, `swords`,
-`pentacles` 폴더를 둔다. 버킷과 버전 폴더까지의 공개 URL은
-`TAROT_CARD_ASSET_BASE_URL`로 관리하므로 `v2`로 교체할 때 DB 행을 수정하지 않는다.
+사용한다. 카드 이미지는 프론트엔드 정적 자산으로 관리하며, 프론트엔드는 API의 `code`를
+이미지 파일과 매핑한다. 백엔드 DB에는 이미지 경로나 URL을 저장하지 않는다.
 
 #### `consultation_sessions`
 

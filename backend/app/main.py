@@ -1,10 +1,8 @@
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from .api import public_router, router
 from .auth import router as auth_router
@@ -47,11 +45,6 @@ app.add_middleware(
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.add_exception_handler(Exception, unhandled_error_handler)
-app.mount(
-    "/static/cards",
-    StaticFiles(directory=Path(__file__).parent / "static" / "cards"),
-    name="tarot-card-assets",
-)
 
 
 @app.middleware("http")
