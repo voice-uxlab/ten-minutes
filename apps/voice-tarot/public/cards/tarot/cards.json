@@ -1,0 +1,764 @@
+{
+  "version": 1,
+  "count": 78,
+  "cards": [
+    {
+      "id": "major-00-fool",
+      "name": "The Fool",
+      "arcana": "major",
+      "number": 0,
+      "sourceFile": "바보.png",
+      "file": "major-00-fool.webp",
+      "path": "/cards/tarot/major-00-fool.webp"
+    },
+    {
+      "id": "major-01-magician",
+      "name": "The Magician",
+      "arcana": "major",
+      "number": 1,
+      "sourceFile": "마법사.png",
+      "file": "major-01-magician.webp",
+      "path": "/cards/tarot/major-01-magician.webp"
+    },
+    {
+      "id": "major-02-high-priestess",
+      "name": "The High Priestess",
+      "arcana": "major",
+      "number": 2,
+      "sourceFile": "여사제.png",
+      "file": "major-02-high-priestess.webp",
+      "path": "/cards/tarot/major-02-high-priestess.webp"
+    },
+    {
+      "id": "major-03-empress",
+      "name": "The Empress",
+      "arcana": "major",
+      "number": 3,
+      "sourceFile": "여황제.png",
+      "file": "major-03-empress.webp",
+      "path": "/cards/tarot/major-03-empress.webp"
+    },
+    {
+      "id": "major-04-emperor",
+      "name": "The Emperor",
+      "arcana": "major",
+      "number": 4,
+      "sourceFile": "황제.png",
+      "file": "major-04-emperor.webp",
+      "path": "/cards/tarot/major-04-emperor.webp"
+    },
+    {
+      "id": "major-05-hierophant",
+      "name": "The Hierophant",
+      "arcana": "major",
+      "number": 5,
+      "sourceFile": "교황.png",
+      "file": "major-05-hierophant.webp",
+      "path": "/cards/tarot/major-05-hierophant.webp"
+    },
+    {
+      "id": "major-06-lovers",
+      "name": "The Lovers",
+      "arcana": "major",
+      "number": 6,
+      "sourceFile": "연인.png",
+      "file": "major-06-lovers.webp",
+      "path": "/cards/tarot/major-06-lovers.webp"
+    },
+    {
+      "id": "major-07-chariot",
+      "name": "The Chariot",
+      "arcana": "major",
+      "number": 7,
+      "sourceFile": "전차.png",
+      "file": "major-07-chariot.webp",
+      "path": "/cards/tarot/major-07-chariot.webp"
+    },
+    {
+      "id": "major-08-strength",
+      "name": "Strength",
+      "arcana": "major",
+      "number": 8,
+      "sourceFile": "힘.png",
+      "file": "major-08-strength.webp",
+      "path": "/cards/tarot/major-08-strength.webp"
+    },
+    {
+      "id": "major-09-hermit",
+      "name": "The Hermit",
+      "arcana": "major",
+      "number": 9,
+      "sourceFile": "은둔자.png",
+      "file": "major-09-hermit.webp",
+      "path": "/cards/tarot/major-09-hermit.webp"
+    },
+    {
+      "id": "major-10-wheel-of-fortune",
+      "name": "Wheel of Fortune",
+      "arcana": "major",
+      "number": 10,
+      "sourceFile": "운명의 수레바퀴.png",
+      "file": "major-10-wheel-of-fortune.webp",
+      "path": "/cards/tarot/major-10-wheel-of-fortune.webp"
+    },
+    {
+      "id": "major-11-justice",
+      "name": "Justice",
+      "arcana": "major",
+      "number": 11,
+      "sourceFile": "정의.png",
+      "file": "major-11-justice.webp",
+      "path": "/cards/tarot/major-11-justice.webp"
+    },
+    {
+      "id": "major-12-hanged-man",
+      "name": "The Hanged Man",
+      "arcana": "major",
+      "number": 12,
+      "sourceFile": "매달린 사람.png",
+      "file": "major-12-hanged-man.webp",
+      "path": "/cards/tarot/major-12-hanged-man.webp"
+    },
+    {
+      "id": "major-13-death",
+      "name": "Death",
+      "arcana": "major",
+      "number": 13,
+      "sourceFile": "죽음.png",
+      "file": "major-13-death.webp",
+      "path": "/cards/tarot/major-13-death.webp"
+    },
+    {
+      "id": "major-14-temperance",
+      "name": "Temperance",
+      "arcana": "major",
+      "number": 14,
+      "sourceFile": "절제.png",
+      "file": "major-14-temperance.webp",
+      "path": "/cards/tarot/major-14-temperance.webp"
+    },
+    {
+      "id": "major-15-devil",
+      "name": "The Devil",
+      "arcana": "major",
+      "number": 15,
+      "sourceFile": "악마.png",
+      "file": "major-15-devil.webp",
+      "path": "/cards/tarot/major-15-devil.webp"
+    },
+    {
+      "id": "major-16-tower",
+      "name": "The Tower",
+      "arcana": "major",
+      "number": 16,
+      "sourceFile": "탑.png",
+      "file": "major-16-tower.webp",
+      "path": "/cards/tarot/major-16-tower.webp"
+    },
+    {
+      "id": "major-17-star",
+      "name": "The Star",
+      "arcana": "major",
+      "number": 17,
+      "sourceFile": "별.png",
+      "file": "major-17-star.webp",
+      "path": "/cards/tarot/major-17-star.webp"
+    },
+    {
+      "id": "major-18-moon",
+      "name": "The Moon",
+      "arcana": "major",
+      "number": 18,
+      "sourceFile": "달.png",
+      "file": "major-18-moon.webp",
+      "path": "/cards/tarot/major-18-moon.webp"
+    },
+    {
+      "id": "major-19-sun",
+      "name": "The Sun",
+      "arcana": "major",
+      "number": 19,
+      "sourceFile": "태양.png",
+      "file": "major-19-sun.webp",
+      "path": "/cards/tarot/major-19-sun.webp"
+    },
+    {
+      "id": "major-20-judgement",
+      "name": "Judgement",
+      "arcana": "major",
+      "number": 20,
+      "sourceFile": "심판.png",
+      "file": "major-20-judgement.webp",
+      "path": "/cards/tarot/major-20-judgement.webp"
+    },
+    {
+      "id": "major-21-world",
+      "name": "The World",
+      "arcana": "major",
+      "number": 21,
+      "sourceFile": "세계.png",
+      "file": "major-21-world.webp",
+      "path": "/cards/tarot/major-21-world.webp"
+    },
+    {
+      "id": "minor-wands-1",
+      "name": "Ace of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "ace",
+      "sourceFile": "완드 에이스.png",
+      "file": "minor-wands-1.webp",
+      "path": "/cards/tarot/minor-wands-1.webp"
+    },
+    {
+      "id": "minor-wands-2",
+      "name": "2 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "2",
+      "sourceFile": "완드 2.png",
+      "file": "minor-wands-2.webp",
+      "path": "/cards/tarot/minor-wands-2.webp"
+    },
+    {
+      "id": "minor-wands-3",
+      "name": "3 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "3",
+      "sourceFile": "완드 3.png",
+      "file": "minor-wands-3.webp",
+      "path": "/cards/tarot/minor-wands-3.webp"
+    },
+    {
+      "id": "minor-wands-4",
+      "name": "4 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "4",
+      "sourceFile": "완드 4.png",
+      "file": "minor-wands-4.webp",
+      "path": "/cards/tarot/minor-wands-4.webp"
+    },
+    {
+      "id": "minor-wands-5",
+      "name": "5 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "5",
+      "sourceFile": "완드 5.png",
+      "file": "minor-wands-5.webp",
+      "path": "/cards/tarot/minor-wands-5.webp"
+    },
+    {
+      "id": "minor-wands-6",
+      "name": "6 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "6",
+      "sourceFile": "완드 6.png",
+      "file": "minor-wands-6.webp",
+      "path": "/cards/tarot/minor-wands-6.webp"
+    },
+    {
+      "id": "minor-wands-7",
+      "name": "7 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "7",
+      "sourceFile": "완드 7.png",
+      "file": "minor-wands-7.webp",
+      "path": "/cards/tarot/minor-wands-7.webp"
+    },
+    {
+      "id": "minor-wands-8",
+      "name": "8 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "8",
+      "sourceFile": "완드 8.png",
+      "file": "minor-wands-8.webp",
+      "path": "/cards/tarot/minor-wands-8.webp"
+    },
+    {
+      "id": "minor-wands-9",
+      "name": "9 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "9",
+      "sourceFile": "완드 9.png",
+      "file": "minor-wands-9.webp",
+      "path": "/cards/tarot/minor-wands-9.webp"
+    },
+    {
+      "id": "minor-wands-10",
+      "name": "10 of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "10",
+      "sourceFile": "완드 10.png",
+      "file": "minor-wands-10.webp",
+      "path": "/cards/tarot/minor-wands-10.webp"
+    },
+    {
+      "id": "minor-wands-page",
+      "name": "Page of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "page",
+      "sourceFile": "완드 페이지.png",
+      "file": "minor-wands-page.webp",
+      "path": "/cards/tarot/minor-wands-page.webp"
+    },
+    {
+      "id": "minor-wands-knight",
+      "name": "Knight of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "knight",
+      "sourceFile": "완드 나이트.png",
+      "file": "minor-wands-knight.webp",
+      "path": "/cards/tarot/minor-wands-knight.webp"
+    },
+    {
+      "id": "minor-wands-queen",
+      "name": "Queen of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "queen",
+      "sourceFile": "완드 퀸.png",
+      "file": "minor-wands-queen.webp",
+      "path": "/cards/tarot/minor-wands-queen.webp"
+    },
+    {
+      "id": "minor-wands-king",
+      "name": "King of Wands",
+      "arcana": "minor",
+      "suit": "wands",
+      "rank": "king",
+      "sourceFile": "완드 킹.png",
+      "file": "minor-wands-king.webp",
+      "path": "/cards/tarot/minor-wands-king.webp"
+    },
+    {
+      "id": "minor-cups-1",
+      "name": "Ace of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "ace",
+      "sourceFile": "컵 에이스.png",
+      "file": "minor-cups-1.webp",
+      "path": "/cards/tarot/minor-cups-1.webp"
+    },
+    {
+      "id": "minor-cups-2",
+      "name": "2 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "2",
+      "sourceFile": "컵 2.png",
+      "file": "minor-cups-2.webp",
+      "path": "/cards/tarot/minor-cups-2.webp"
+    },
+    {
+      "id": "minor-cups-3",
+      "name": "3 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "3",
+      "sourceFile": "컵 3.png",
+      "file": "minor-cups-3.webp",
+      "path": "/cards/tarot/minor-cups-3.webp"
+    },
+    {
+      "id": "minor-cups-4",
+      "name": "4 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "4",
+      "sourceFile": "컵 4.png",
+      "file": "minor-cups-4.webp",
+      "path": "/cards/tarot/minor-cups-4.webp"
+    },
+    {
+      "id": "minor-cups-5",
+      "name": "5 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "5",
+      "sourceFile": "컵 5.png",
+      "file": "minor-cups-5.webp",
+      "path": "/cards/tarot/minor-cups-5.webp"
+    },
+    {
+      "id": "minor-cups-6",
+      "name": "6 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "6",
+      "sourceFile": "컵 6.png",
+      "file": "minor-cups-6.webp",
+      "path": "/cards/tarot/minor-cups-6.webp"
+    },
+    {
+      "id": "minor-cups-7",
+      "name": "7 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "7",
+      "sourceFile": "컵 7.png",
+      "file": "minor-cups-7.webp",
+      "path": "/cards/tarot/minor-cups-7.webp"
+    },
+    {
+      "id": "minor-cups-8",
+      "name": "8 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "8",
+      "sourceFile": "컵 8.png",
+      "file": "minor-cups-8.webp",
+      "path": "/cards/tarot/minor-cups-8.webp"
+    },
+    {
+      "id": "minor-cups-9",
+      "name": "9 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "9",
+      "sourceFile": "컵 9.png",
+      "file": "minor-cups-9.webp",
+      "path": "/cards/tarot/minor-cups-9.webp"
+    },
+    {
+      "id": "minor-cups-10",
+      "name": "10 of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "10",
+      "sourceFile": "컵 10.png",
+      "file": "minor-cups-10.webp",
+      "path": "/cards/tarot/minor-cups-10.webp"
+    },
+    {
+      "id": "minor-cups-page",
+      "name": "Page of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "page",
+      "sourceFile": "컵 페이지.png",
+      "file": "minor-cups-page.webp",
+      "path": "/cards/tarot/minor-cups-page.webp"
+    },
+    {
+      "id": "minor-cups-knight",
+      "name": "Knight of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "knight",
+      "sourceFile": "컵 나이트.png",
+      "file": "minor-cups-knight.webp",
+      "path": "/cards/tarot/minor-cups-knight.webp"
+    },
+    {
+      "id": "minor-cups-queen",
+      "name": "Queen of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "queen",
+      "sourceFile": "컵 퀸.png",
+      "file": "minor-cups-queen.webp",
+      "path": "/cards/tarot/minor-cups-queen.webp"
+    },
+    {
+      "id": "minor-cups-king",
+      "name": "King of Cups",
+      "arcana": "minor",
+      "suit": "cups",
+      "rank": "king",
+      "sourceFile": "컵 킹.png",
+      "file": "minor-cups-king.webp",
+      "path": "/cards/tarot/minor-cups-king.webp"
+    },
+    {
+      "id": "minor-swords-1",
+      "name": "Ace of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "ace",
+      "sourceFile": "소드 에이스.png",
+      "file": "minor-swords-1.webp",
+      "path": "/cards/tarot/minor-swords-1.webp"
+    },
+    {
+      "id": "minor-swords-2",
+      "name": "2 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "2",
+      "sourceFile": "소드 2.png",
+      "file": "minor-swords-2.webp",
+      "path": "/cards/tarot/minor-swords-2.webp"
+    },
+    {
+      "id": "minor-swords-3",
+      "name": "3 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "3",
+      "sourceFile": "소드 3.png",
+      "file": "minor-swords-3.webp",
+      "path": "/cards/tarot/minor-swords-3.webp"
+    },
+    {
+      "id": "minor-swords-4",
+      "name": "4 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "4",
+      "sourceFile": "소드 4.png",
+      "file": "minor-swords-4.webp",
+      "path": "/cards/tarot/minor-swords-4.webp"
+    },
+    {
+      "id": "minor-swords-5",
+      "name": "5 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "5",
+      "sourceFile": "소드 5.png",
+      "file": "minor-swords-5.webp",
+      "path": "/cards/tarot/minor-swords-5.webp"
+    },
+    {
+      "id": "minor-swords-6",
+      "name": "6 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "6",
+      "sourceFile": "소드 6.png",
+      "file": "minor-swords-6.webp",
+      "path": "/cards/tarot/minor-swords-6.webp"
+    },
+    {
+      "id": "minor-swords-7",
+      "name": "7 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "7",
+      "sourceFile": "소드 7.png",
+      "file": "minor-swords-7.webp",
+      "path": "/cards/tarot/minor-swords-7.webp"
+    },
+    {
+      "id": "minor-swords-8",
+      "name": "8 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "8",
+      "sourceFile": "소드 8.png",
+      "file": "minor-swords-8.webp",
+      "path": "/cards/tarot/minor-swords-8.webp"
+    },
+    {
+      "id": "minor-swords-9",
+      "name": "9 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "9",
+      "sourceFile": "소드 9.png",
+      "file": "minor-swords-9.webp",
+      "path": "/cards/tarot/minor-swords-9.webp"
+    },
+    {
+      "id": "minor-swords-10",
+      "name": "10 of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "10",
+      "sourceFile": "소드 10.png",
+      "file": "minor-swords-10.webp",
+      "path": "/cards/tarot/minor-swords-10.webp"
+    },
+    {
+      "id": "minor-swords-page",
+      "name": "Page of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "page",
+      "sourceFile": "소드 페이지.png",
+      "file": "minor-swords-page.webp",
+      "path": "/cards/tarot/minor-swords-page.webp"
+    },
+    {
+      "id": "minor-swords-knight",
+      "name": "Knight of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "knight",
+      "sourceFile": "소드 나이트.png",
+      "file": "minor-swords-knight.webp",
+      "path": "/cards/tarot/minor-swords-knight.webp"
+    },
+    {
+      "id": "minor-swords-queen",
+      "name": "Queen of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "queen",
+      "sourceFile": "소드 퀸.png",
+      "file": "minor-swords-queen.webp",
+      "path": "/cards/tarot/minor-swords-queen.webp"
+    },
+    {
+      "id": "minor-swords-king",
+      "name": "King of Swords",
+      "arcana": "minor",
+      "suit": "swords",
+      "rank": "king",
+      "sourceFile": "소드 킹.png",
+      "file": "minor-swords-king.webp",
+      "path": "/cards/tarot/minor-swords-king.webp"
+    },
+    {
+      "id": "minor-pentacles-1",
+      "name": "Ace of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "ace",
+      "sourceFile": "펜타클 에이스.png",
+      "file": "minor-pentacles-1.webp",
+      "path": "/cards/tarot/minor-pentacles-1.webp"
+    },
+    {
+      "id": "minor-pentacles-2",
+      "name": "2 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "2",
+      "sourceFile": "펜타클 2.png",
+      "file": "minor-pentacles-2.webp",
+      "path": "/cards/tarot/minor-pentacles-2.webp"
+    },
+    {
+      "id": "minor-pentacles-3",
+      "name": "3 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "3",
+      "sourceFile": "펜타클 3.png",
+      "file": "minor-pentacles-3.webp",
+      "path": "/cards/tarot/minor-pentacles-3.webp"
+    },
+    {
+      "id": "minor-pentacles-4",
+      "name": "4 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "4",
+      "sourceFile": "펜타클 4.png",
+      "file": "minor-pentacles-4.webp",
+      "path": "/cards/tarot/minor-pentacles-4.webp"
+    },
+    {
+      "id": "minor-pentacles-5",
+      "name": "5 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "5",
+      "sourceFile": "펜타클 5.png",
+      "file": "minor-pentacles-5.webp",
+      "path": "/cards/tarot/minor-pentacles-5.webp"
+    },
+    {
+      "id": "minor-pentacles-6",
+      "name": "6 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "6",
+      "sourceFile": "펜타클 6.png",
+      "file": "minor-pentacles-6.webp",
+      "path": "/cards/tarot/minor-pentacles-6.webp"
+    },
+    {
+      "id": "minor-pentacles-7",
+      "name": "7 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "7",
+      "sourceFile": "펜타클 7.png",
+      "file": "minor-pentacles-7.webp",
+      "path": "/cards/tarot/minor-pentacles-7.webp"
+    },
+    {
+      "id": "minor-pentacles-8",
+      "name": "8 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "8",
+      "sourceFile": "펜타클 8.png",
+      "file": "minor-pentacles-8.webp",
+      "path": "/cards/tarot/minor-pentacles-8.webp"
+    },
+    {
+      "id": "minor-pentacles-9",
+      "name": "9 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "9",
+      "sourceFile": "펜타클 9.png",
+      "file": "minor-pentacles-9.webp",
+      "path": "/cards/tarot/minor-pentacles-9.webp"
+    },
+    {
+      "id": "minor-pentacles-10",
+      "name": "10 of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "10",
+      "sourceFile": "펜타클 10.png",
+      "file": "minor-pentacles-10.webp",
+      "path": "/cards/tarot/minor-pentacles-10.webp"
+    },
+    {
+      "id": "minor-pentacles-page",
+      "name": "Page of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "page",
+      "sourceFile": "펜타클 페이지.png",
+      "file": "minor-pentacles-page.webp",
+      "path": "/cards/tarot/minor-pentacles-page.webp"
+    },
+    {
+      "id": "minor-pentacles-knight",
+      "name": "Knight of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "knight",
+      "sourceFile": "펜타클 나이트.png",
+      "file": "minor-pentacles-knight.webp",
+      "path": "/cards/tarot/minor-pentacles-knight.webp"
+    },
+    {
+      "id": "minor-pentacles-queen",
+      "name": "Queen of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "queen",
+      "sourceFile": "펜타클 퀸.png",
+      "file": "minor-pentacles-queen.webp",
+      "path": "/cards/tarot/minor-pentacles-queen.webp"
+    },
+    {
+      "id": "minor-pentacles-king",
+      "name": "King of Pentacles",
+      "arcana": "minor",
+      "suit": "pentacles",
+      "rank": "king",
+      "sourceFile": "펜타클 킹.png",
+      "file": "minor-pentacles-king.webp",
+      "path": "/cards/tarot/minor-pentacles-king.webp"
+    }
+  ]
+}
