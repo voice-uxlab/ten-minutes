@@ -131,7 +131,6 @@ class CardResponse(StrictModel):
     suit: Optional[TarotSuit] = Field(description="Minor-arcana suit, or null for major and unrevealed cards")
     rank: Optional[str] = Field(description="Major number or minor rank, or null before reveal")
     direction: Optional[CardDirection] = Field(description="UPRIGHT, or null before reveal")
-    image_url: Optional[str] = Field(description="Absolute image URL, or null before reveal")
     keywords: Optional[list[str]] = Field(description="Upright keywords, or null before reveal")
     revealed_at: Optional[datetime] = Field(description="Card reveal timestamp, or null before reveal")
 
@@ -161,7 +160,9 @@ class ConsultationListItem(StrictModel):
     expected_card_count: int = Field(description="Number of cards required")
     report_status: Optional[ReportStatus] = Field(description="Report generation state")
     situation_summary: Optional[str] = Field(description="One-line situation summary from the report")
-    thumbnail_image_url: Optional[str] = Field(description="Thumbnail URL for the first revealed card")
+    thumbnail_card_code: Optional[str] = Field(
+        description="Stable code of the first revealed card for frontend thumbnail lookup"
+    )
     created_at: datetime = Field(description="Consultation creation timestamp")
     ended_at: Optional[datetime] = Field(description="Consultation end timestamp")
 

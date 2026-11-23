@@ -26,7 +26,6 @@ def test_migrated_postgresql_database_is_ready():
             assert star.name_ko == "별"
             assert (star.arcana, star.suit, star.rank) == ("MAJOR", None, "17")
             assert star.code == "major-17-star"
-            assert star.image_path == "major/17-star.png"
             ace_of_wands = db.scalar(select(TarotCard).where(TarotCard.id == 22))
             assert (ace_of_wands.arcana, ace_of_wands.suit, ace_of_wands.rank) == (
                 "MINOR",
@@ -36,6 +35,6 @@ def test_migrated_postgresql_database_is_ready():
             assert ace_of_wands.code == "wands-ace"
             assert ace_of_wands.upright_keywords
             assert not hasattr(ace_of_wands, "reversed_keywords")
-            assert ace_of_wands.image_path == "wands/22-ace.png"
+            assert not hasattr(ace_of_wands, "image_path")
     finally:
         engine.dispose()

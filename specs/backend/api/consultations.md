@@ -70,6 +70,8 @@
       "status": "ENDED",
       "expected_card_count": 3,
       "report_status": "COMPLETED",
+      "situation_summary": "관계를 기다리기보다 내 기준을 세울 때야.",
+      "thumbnail_card_code": "major-17-star",
       "created_at": "2026-11-12T10:00:00Z",
       "ended_at": "2026-11-12T10:10:00Z"
     }
@@ -78,7 +80,9 @@
 }
 ```
 
-목록 화면에 카드 정보가 필요한지 FE와 확인한 뒤 응답 필드 추가 여부를 정한다. 현재는 **TBD**다.
+`thumbnail_card_code`는 첫 번째로 공개된 카드의 안정적인 코드다. 프론트엔드는 이 값을
+정적 카드 이미지와 매핑한다. 공개된 카드가 없으면 `null`이다. 백엔드는 카드 이미지 URL을
+반환하지 않는다.
 
 ### 1.3 상담 상세
 

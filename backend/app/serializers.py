@@ -1,24 +1,11 @@
 from typing import Optional
 
-from .config import Settings, get_settings
+from .config import Settings
 from .models import Consultation, ConsultationCard, User, ensure_utc
 
 
 def public_origin(settings: Settings) -> str:
     return settings.public_web_origin.rstrip("/")
-
-
-def card_image_url(image_path: str) -> str:
-    if image_path.startswith(("http://", "https://")):
-        return image_path
-    settings = get_settings()
-    base_url = settings.tarot_card_asset_base_url
-    if base_url:
-        return f"{base_url.rstrip('/')}/{image_path.lstrip('/')}"
-    return (
-        f"{settings.backend_origin.rstrip('/')}/static/cards/"
-        f"{image_path.lstrip('/')}"
-    )
 
 
 def user_response(user: User) -> dict:
@@ -52,7 +39,6 @@ def card_response(
         "suit": None,
         "rank": None,
         "direction": None,
-        "image_url": None,
         "keywords": None,
         "revealed_at": ensure_utc(card.revealed_at),
     }
@@ -68,7 +54,6 @@ def card_response(
             "suit": definition.suit,
             "rank": definition.rank,
             "direction": card.direction,
-            "image_url": card_image_url(definition.image_path),
             "keywords": list(definition.upright_keywords),
         }
     )

@@ -209,9 +209,9 @@ def list_consultations(
                 "expected_card_count": item.expected_card_count,
                 "report_status": item.report.status if item.report else None,
                 "situation_summary": item.report.situation_summary if item.report else None,
-                "thumbnail_image_url": next(
+                "thumbnail_card_code": next(
                     (
-                        card_response(card)["image_url"]
+                        card.tarot_card.code
                         for card in item.cards
                         if card.revealed_at is not None
                     ),
