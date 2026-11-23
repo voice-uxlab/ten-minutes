@@ -45,11 +45,6 @@ def card_response(
     if not revealed:
         return response
     definition = card.tarot_card
-    keywords = (
-        definition.upright_keywords
-        if card.direction == "UPRIGHT"
-        else definition.reversed_keywords
-    )
     response.update(
         {
             "card_id": card.card_id,
@@ -59,7 +54,7 @@ def card_response(
             "suit": definition.suit,
             "rank": definition.rank,
             "direction": card.direction,
-            "keywords": list(keywords),
+            "keywords": list(definition.upright_keywords),
         }
     )
     if reading is not None:

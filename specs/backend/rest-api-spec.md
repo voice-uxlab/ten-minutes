@@ -70,7 +70,7 @@ Pydantic 형식 오류도 이 구조로 변환할지 FastAPI 기본 `detail` 형
 | `card_id` | `int` | 서버 카드 ID |
 | `card_code` | `str` | 프론트엔드 이미지 매핑에도 사용하는 안정적인 카드 코드 |
 | `name` | `str` | 표시 이름 |
-| `direction` | `CardDirection` | `UPRIGHT`, `REVERSED` |
+| `direction` | `CardDirection` | `UPRIGHT` |
 | `keywords` | `list[str]` | 표시, 리딩용 핵심어 |
 | `revealed_at` | `datetime | None` | 공개 전에는 `null` |
 

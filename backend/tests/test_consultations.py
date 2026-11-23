@@ -42,6 +42,16 @@ def test_tarot_card_taxonomy_covers_the_full_deck():
     ]
 
 
+def test_shuffled_deck_contains_only_card_ids(db_session):
+    from app.api import shuffled_deck
+
+    deck = shuffled_deck(db_session)
+
+    assert len(deck) == 78
+    assert all(set(card) == {"card_id"} for card in deck)
+    assert len({card["card_id"] for card in deck}) == 78
+
+
 def test_consultation_cards_are_fixed_and_revealed_in_order(authenticated_client):
     client, _ = authenticated_client
     consultation = create_consultation(client)
@@ -89,6 +99,8 @@ def test_consultation_cards_are_fixed_and_revealed_in_order(authenticated_client
                 "PENTACLES",
             }
         assert reveal.json()["card"]["rank"]
+        assert reveal.json()["card"]["direction"] == "UPRIGHT"
+        assert reveal.json()["card"]["keywords"]
         assert "image_url" not in reveal.json()["card"]
 
 

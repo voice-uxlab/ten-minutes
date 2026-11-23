@@ -1,8 +1,8 @@
 """Remove backend-managed tarot image paths.
 
-Revision ID: 20261122_0005
-Revises: 20261121_0004
-Create Date: 2026-11-22
+Revision ID: 20261123_0006
+Revises: 20261122_0005
+Create Date: 2026-11-23
 """
 
 from typing import Sequence, Union
@@ -13,8 +13,8 @@ from alembic import op
 from app.deck import DECK, card_image_path
 
 
-revision: str = "20261122_0005"
-down_revision: Union[str, None] = "20261121_0004"
+revision: str = "20261123_0006"
+down_revision: Union[str, None] = "20261122_0005"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

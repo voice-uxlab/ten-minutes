@@ -46,7 +46,6 @@ class ConsultationStatus(str, Enum):
 
 class CardDirection(str, Enum):
     UPRIGHT = "UPRIGHT"
-    REVERSED = "REVERSED"
 
 
 class Arcana(str, Enum):
@@ -131,8 +130,8 @@ class CardResponse(StrictModel):
     arcana: Optional[Arcana] = Field(description="MAJOR or MINOR, or null before reveal")
     suit: Optional[TarotSuit] = Field(description="Minor-arcana suit, or null for major and unrevealed cards")
     rank: Optional[str] = Field(description="Major number or minor rank, or null before reveal")
-    direction: Optional[CardDirection] = Field(description="UPRIGHT or REVERSED, or null before reveal")
-    keywords: Optional[list[str]] = Field(description="Keywords for the card direction, or null before reveal")
+    direction: Optional[CardDirection] = Field(description="UPRIGHT, or null before reveal")
+    keywords: Optional[list[str]] = Field(description="Upright keywords, or null before reveal")
     revealed_at: Optional[datetime] = Field(description="Card reveal timestamp, or null before reveal")
 
 

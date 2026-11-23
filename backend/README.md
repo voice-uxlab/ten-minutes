@@ -58,6 +58,10 @@ Vercel에서는 FastAPI의 `DATABASE_URL`에 Transaction pooler(6543)를 사용�
 Session 또는 Direct 연결로 실행합니다. 런타임 연결 풀은 서버리스 인스턴스당 1개이며
 transaction pooler 호환을 위해 psycopg prepared statement를 비활성화합니다.
 
+Alembic 대신 Supabase SQL Editor에서 카드 테이블과 78장 기준 데이터만 먼저 생성하려면
+`sql/supabase_tarot_cards.sql` 전체를 실행합니다. 이 SQL은 재실행 가능한 upsert이며 실행 후
+총 78장, 메이저 22장, 마이너 56장을 확인하는 검증 쿼리도 포함합니다.
+
 PostgreSQL 연결 확인은 별도 테스트 DB의 `TEST_DATABASE_URL`을 설정한 뒤 실행합니다.
 
 ```bash

@@ -92,7 +92,7 @@ def shuffled_deck(db: Session) -> list[dict]:
         raise APIError(503, "TAROT_DECK_NOT_READY", "The tarot deck is not ready.")
     random = secrets.SystemRandom()
     random.shuffle(card_ids)
-    return [{"card_id": card_id, "reversed": bool(random.getrandbits(1))} for card_id in card_ids]
+    return [{"card_id": card_id} for card_id in card_ids]
 
 
 @router.get(
@@ -316,7 +316,7 @@ def select_cards(
                 picked_number=picked_number,
                 position=positions[index],
                 card_id=mapped["card_id"],
-                direction="REVERSED" if mapped["reversed"] else "UPRIGHT",
+                direction="UPRIGHT",
             )
         )
     try:

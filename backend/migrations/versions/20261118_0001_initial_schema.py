@@ -51,7 +51,6 @@ def upgrade() -> None:
         sa.Column("code", sa.String(length=64), nullable=False),
         sa.Column("name_ko", sa.String(length=64), nullable=False),
         sa.Column("upright_keywords", keyword_type, nullable=False),
-        sa.Column("reversed_keywords", keyword_type, nullable=False),
         sa.Column("image_path", sa.String(length=255), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("code"),
@@ -63,7 +62,6 @@ def upgrade() -> None:
         sa.column("code", sa.String()),
         sa.column("name_ko", sa.String()),
         sa.column("upright_keywords", keyword_type),
-        sa.column("reversed_keywords", keyword_type),
         sa.column("image_path", sa.String()),
     )
     seed_rows = [
@@ -72,10 +70,9 @@ def upgrade() -> None:
             "code": f"card-{card_id:02d}",
             "name_ko": name,
             "upright_keywords": list(upright),
-            "reversed_keywords": list(reversed_keywords),
             "image_path": dummy_image_path_for(card_id),
         }
-        for card_id, name, upright, reversed_keywords in DECK
+        for card_id, name, upright in DECK
     ]
     for row in seed_rows:
         op.execute(
@@ -85,10 +82,6 @@ def upgrade() -> None:
                 name_ko=row["name_ko"],
                 upright_keywords=postgresql.array(
                     [op.inline_literal(value) for value in row["upright_keywords"]],
-                    type_=sa.Text(),
-                ),
-                reversed_keywords=postgresql.array(
-                    [op.inline_literal(value) for value in row["reversed_keywords"]],
                     type_=sa.Text(),
                 ),
                 image_path=row["image_path"],
