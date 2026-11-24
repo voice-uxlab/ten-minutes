@@ -8,12 +8,12 @@ import {join} from 'node:path';
 const readingDirectory=await mkdtemp(join(tmpdir(),'tarot-http-'));
 process.env.READING_STORE_DIR=readingDirectory;
 const {server}=await import('../server/server.ts');
-import {ttsConfig} from '../server/tts-config.ts';
 
 test('server keeps keys private, requests text-only Realtime, and requires TTS configuration', async t => {
   const saved = Object.fromEntries(['OPENAI_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','TTS_PROVIDER','TYPECAST_API_KEY','TYPECAST_VOICE_ID'].map(k => [k, process.env[k]]));
   process.env.TTS_PROVIDER='elevenlabs';
   Object.assign(process.env, {OPENAI_API_KEY:'test-openai', ELEVENLABS_API_KEY:'test-eleven', ELEVENLABS_VOICE_ID:'test-voice'});
+  delete process.env.TYPECAST_API_KEY;
   t.after(async () => {
     for (const [key,value] of Object.entries(saved)) {if(value===undefined)delete process.env[key];else process.env[key]=value;}
     server.closeAllConnections();
@@ -41,35 +41,21 @@ test('server keeps keys private, requests text-only Realtime, and requires TTS c
   const partial=await post({id,action:'select_numbers',args:{picks:[7,22]}});assert.equal(partial.result.remaining,1);assert.equal(partial.state.cards.length,0);
   await post({id,action:'select_numbers',args:{picks:[78]}});
   const drawn=await post({id,action:'confirm_cards'});assert.equal(drawn.state.cards.length,3);
-  assert.equal((await fetch(base+'/spreads.mjs')).status,200);
-  assert.equal((await fetch(base+'/card-knowledge.mjs')).status,404);
+  for (const path of ['/spreads.mjs', '/card-knowledge.mjs', '/voice-lab', '/voice-settings']) {
+    assert.equal((await fetch(base + path)).status, 404);
+  }
+  for (const path of ['/voice-settings', '/test-logs', '/test-recording', '/live-session', '/live-report']) {
+    assert.equal((await fetch(base + path, { method: 'POST', body: '{}' })).status, 404);
+  }
+  assert.equal((await fetch(base + '/session', { method: 'POST' })).status, 503);
+  assert.equal(calls.length, 0);
+  Object.assign(process.env, {TYPECAST_API_KEY:'private-typecast',TYPECAST_VOICE_ID:'tc_test'});
   const session=await fetch(base+'/session',{method:'POST'});
+  assert.equal(session.status,200);
   assert.deepEqual(await session.json(),{value:'ephemeral-only'});
-  assert.deepEqual(calls[0].body.session.output_modalities,['text']);assert.ok(calls[0].body.session.instructions.includes(readFileSync(new URL('../soul.md',import.meta.url),'utf8').trim()));
-  delete process.env.ELEVENLABS_VOICE_ID;
-  assert.equal((await fetch(base+'/session',{method:'POST'})).status,503);
-  assert.equal(calls.length,1);
-  process.env.TTS_PROVIDER='typecast';
-  delete process.env.TYPECAST_API_KEY;
-  assert.equal((await fetch(base+'/session',{method:'POST'})).status,503);
-  Object.assign(process.env,{TYPECAST_API_KEY:'private-typecast',TYPECAST_VOICE_ID:'tc_test'});
-  const typecastSession=await fetch(base+'/session',{method:'POST'});
-  assert.equal(typecastSession.status,200);
-  assert.deepEqual(await typecastSession.json(),{value:'ephemeral-only'});
-  assert.deepEqual(calls[1].body.session.output_modalities,['text']);
-  assert.ok(!calls[1].body.session.instructions.includes('[confident]'));
+  assert.deepEqual(calls[0].body.session.output_modalities,['text']);
+  assert.ok(calls[0].body.session.instructions.includes(readFileSync(new URL('../soul.md',import.meta.url),'utf8').trim()));
   assert.ok(!JSON.stringify(calls).includes('private-typecast'));
-  const settingsResponse=await fetch(base+'/voice-settings');
-  const info=await settingsResponse.json();
-  assert.equal(info.keyConfigured,true);
-  assert.ok(!JSON.stringify(info).includes('private-typecast'));
-  const payload={...info.settings,voice:'tc_lamie',speed:1.2};
-  assert.equal((await fetch(base+'/voice-settings',{method:'POST',headers:{Origin:'https://other.test'},body:JSON.stringify(payload)})).status,403);
-  assert.equal((await fetch(base+'/voice-settings',{method:'POST',body:JSON.stringify({...payload,speed:5})})).status,400);
-  assert.equal((await fetch(base+'/voice-settings',{method:'POST',body:JSON.stringify(payload)})).status,200);
-  assert.equal(ttsConfig().voice,'tc_lamie');
-  assert.equal(ttsConfig().settings.speed,1.2);
-  assert.equal((await fetch(base+'/voice-lab')).status,200);
   const variant=await post({action:'create',personaId:'test-friend'});
   assert.equal(variant.state.personaId,'test-friend');
   const variantSession=await fetch(base+'/session',{method:'POST',body:JSON.stringify({id:variant.id})});

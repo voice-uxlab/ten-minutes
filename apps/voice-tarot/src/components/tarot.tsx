@@ -1,5 +1,4 @@
 import { type ReactNode } from "react";
-import type { Note } from "@/api/types";
 
 export function BrandHeader({ children }: { children?: ReactNode }) {
   return (
@@ -72,46 +71,5 @@ export function Reader({
         <p role="status">{status}</p>
       </div>
     </div>
-  );
-}
-const labels: Record<string, string> = {
-  user: "공주",
-  assistant: "레나",
-  flow: "진행 기록",
-  example: "시범 사연",
-};
-export function Notes({
-  notes,
-  open = false,
-}: {
-  notes: Note[];
-  open?: boolean;
-}) {
-  return (
-    <details className="conversation-notes" open={open || undefined}>
-      <summary>상담 흐름 · 대화 노트</summary>
-      {notes.length ? (
-        notes.map((entry) => (
-          <article key={entry.sequence}>
-            <small>
-              {entry.sequence}. {entry.stageLabel} ·{" "}
-              {labels[entry.kind] || "기록"}
-              {entry.source === "demo" ? " (시범)" : ""}
-            </small>
-            <p>{entry.text}</p>
-            {entry.focusSlots?.length ? (
-              <small>
-                {entry.focusSlots
-                  .map((slot) => entry.spread?.positions[slot - 1])
-                  .filter(Boolean)
-                  .join(" / ")}
-              </small>
-            ) : null}
-          </article>
-        ))
-      ) : (
-        <p>이 상담에는 흐름별 대화 노트가 없어요.</p>
-      )}
-    </details>
   );
 }

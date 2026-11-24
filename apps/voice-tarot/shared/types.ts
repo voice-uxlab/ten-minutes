@@ -99,10 +99,6 @@ export interface ReadingResponse {
   result: ReadingResult;
 }
 export interface Profile {
-  nick: string;
-  tickets: number;
-  freeUsed: boolean;
-  bgm: boolean;
   last?: Session;
 }
 export const emptyReading: Reading = {

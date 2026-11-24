@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { readingOptions } from "@/api/client";
 import type { Session } from "@/api/types";
-import { loadSession, profile } from "@/lib/storage";
+import { loadSession } from "@/lib/storage";
 import { Consultation } from "@/features/consultation/controller";
 import {
   selectionCount,
@@ -12,7 +12,7 @@ import {
 } from "@/features/consultation/domain";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BrandHeader, Reader, Panel, Notes } from "@/components/tarot";
+import { BrandHeader, Reader, Panel } from "@/components/tarot";
 const topicSets = [
   [
     "그 사람도 나를 좋아할까?",
@@ -54,15 +54,16 @@ export function SessionPage() {
         <Link to="/">홈으로</Link>
       </section>
     );
-  const local = loadSession(id);
+  const previous = loadSession(id);
+  const local = previous?.demo ? undefined : previous;
   const session: Session = {
     transcript: [],
     notes: [],
     date: new Date().toISOString(),
-    demo: false,
     ...local,
     ...reading.data!.state,
     readingId: id,
+    demo: false,
   };
   return <Call key={id} initial={session} />;
 }
@@ -75,7 +76,6 @@ function Call({ initial }: { initial: Session }) {
     [topics, setTopics] = useState(0),
     [consent, setConsent] = useState(!!location.state?.consent),
     [edit, setEdit] = useState(false),
-    [pace, setPace] = useState(v.speakingPace),
     [question, setQuestion] = useState(s.question),
     mounted = useRef(false);
   useEffect(() => {
@@ -141,21 +141,17 @@ function Call({ initial }: { initial: Session }) {
           </Panel>
         )}
         {s.cards.length > 0 && <Cards cards={s.cards} revealed={s.revealed} />}
-        {!s.demo ? (
-          <label className="consent">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-            />
-            {s.voiceEngine === "live-noeul"
-              ? "음성을 OpenAI에 전송하여 음성 상담을 진행하는 데 동의해요."
-              : "음성은 OpenAI로, 답변 텍스트는 타입캐스트로 전송하는 데 동의해요."}
-          </label>
-        ) : null}
+        <label className="consent">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+          />
+          음성은 OpenAI로, 답변 텍스트는 타입캐스트로 전송하는 데 동의해요.
+        </label>
         <Button
           size="wide"
-          disabled={!s.demo && !consent}
+          disabled={!consent}
           onClick={() => void controller.start()}
         >
           {v.startIssue === "microphone"
@@ -197,12 +193,6 @@ function Call({ initial }: { initial: Session }) {
             {v.phase === "ending" ? "리포트 정리 중…" : "오늘의 리포트 보기"}
           </Link>
         </Button>
-        {v.testLogPath ? (
-          <p role="status">
-            대화 로그 저장됨: <code>{v.testLogPath}</code>
-          </p>
-        ) : null}
-        {v.testLogError ? <p role="alert">{v.testLogError}</p> : null}
         {v.recording ? (
           <a
             className="button glass"
@@ -215,7 +205,6 @@ function Call({ initial }: { initial: Session }) {
         <Button asChild size="wide">
           <Link to="/">타로 다시 보기</Link>
         </Button>
-        <Notes notes={s.notes} open={s.demo} />
       </section>
     );
   const selecting = ["picking", "confirm"].includes(v.phase),
@@ -243,9 +232,7 @@ function Call({ initial }: { initial: Session }) {
   const timer =
     v.phase === "connecting"
       ? "연결 중"
-      : s.demo
-        ? "시범"
-        : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`;
+      : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`;
   const ordinal =
     focused && ["첫 번째", "두 번째", "세 번째"][focused.slot - 1];
   const heading = retry
@@ -265,45 +252,11 @@ function Call({ initial }: { initial: Session }) {
     <section className="page metallic-page call-page" data-phase={phase}>
       <BrandHeader>
         <span
-          className={`timer glass${!s.demo && v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
+          className={`timer glass${v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
         >
           ● {timer}
         </span>
       </BrandHeader>
-      {import.meta.env.DEV && s.voiceEngine === "live-noeul" && !s.demo ? (
-        <details className="panel" data-testid="developer-voice-controls">
-          <summary>개발자 · 노을 말속도</summary>
-          <label htmlFor="noeul-pace">말속도 목표 {pace.toFixed(2)}배</label>
-          <input
-            id="noeul-pace"
-            type="range"
-            min="0.8"
-            max="2"
-            step="0.05"
-            value={pace}
-            onChange={(e) => setPace(Number(e.target.value))}
-            style={{ width: "100%" }}
-          />
-          <Button
-            disabled={v.phase === "connecting"}
-            onClick={() => controller.setSpeakingPace(pace)}
-          >
-            통화 중 적용
-          </Button>
-          <p className="hint">
-            고정 배속이 아닌 발화 속도 목표예요. 재연결 없이 이후 발화에
-            반영하며, 이 브라우저의 다음 통화에도 유지돼요.
-          </p>
-          <p role="status">{v.paceMessage}</p>
-        </details>
-      ) : null}
-      {import.meta.env.DEV &&
-      s.voiceEngine === "live-typecast" &&
-      v.transcriptToAudioMs !== undefined ? (
-        <p className="hint">
-          최근 자막 구간 → 첫 음성 재생: {v.transcriptToAudioMs}ms (최근 구간)
-        </p>
-      ) : null}
       {v.phase === "reveal" && focused ? (
         <p className="eyebrow">
           PICKED BY PRINCESS / {focused.slot} OF {s.cards.length}
@@ -519,14 +472,6 @@ function Call({ initial }: { initial: Session }) {
           {v.error}
         </p>
       ) : null}
-      {!s.demo && v.remaining <= 60 && profile().tickets > 0 ? (
-        <Button
-          disabled={v.busy}
-          onClick={() => void controller.interact("extend_call")}
-        >
-          이용권으로 10분 연장
-        </Button>
-      ) : null}
       {v.phase === "listening" && (
         <div className="listening-wave">
           <Wave />
@@ -538,23 +483,22 @@ function Call({ initial }: { initial: Session }) {
           <button
             aria-label="마이크 음소거"
             aria-pressed={v.muted}
-            disabled={s.demo}
             onClick={() => controller.mute()}
           >
             <span className="control-icon">
               <img
                 src={
-                  v.muted || s.demo
+                  v.muted
                     ? "/assets/metallic/mic-off.png"
                     : "/assets/metallic/mic.png"
                 }
-                width={v.muted || s.demo ? 43 : 24}
-                height={v.muted || s.demo ? 43 : 24}
+                width={v.muted ? 43 : 24}
+                height={v.muted ? 43 : 24}
                 alt=""
               />
             </span>
             <span className="control-label">
-              {s.demo || v.muted ? "마이크 꺼짐" : "마이크 켜짐"}
+              {v.muted ? "마이크 꺼짐" : "마이크 켜짐"}
             </span>
           </button>
           <button id="hangup" onClick={() => void controller.end()}>
@@ -568,29 +512,8 @@ function Call({ initial }: { initial: Session }) {
             </span>
             <span className="control-label">통화 종료</span>
           </button>
-          <Button
-            id="bgm"
-            variant="ghost"
-            onClick={() => controller.setMusic(!v.bgm)}
-          >
-            배경음 {v.bgm ? "켜짐" : "꺼짐"}
-          </Button>
         </div>
       )}
-      {s.demo &&
-      !summary &&
-      ["listening", "reveal", "reading"].includes(v.phase) ? (
-        <Button
-          size="wide"
-          className="demo-action"
-          disabled={v.busy}
-          onClick={() => void controller.nextDemo()}
-        >
-          {v.phase === "listening"
-            ? "예시 고민으로 계속하기 →"
-            : "다음 이야기 듣기 →"}
-        </Button>
-      ) : null}
       {summary && (
         <Button
           size="wide"

@@ -199,15 +199,6 @@
 .intro .notice .text-button {
   padding: 4px 0;
 }
-.intro .home-options {
-  padding-inline: 6px;
-}
-.intro .home-options summary {
-  color: var(--pink);
-}
-.intro .home-options fieldset + fieldset {
-  margin-top: 12px;
-}
 .intro:has(.home-menu) .metallic-header {
   z-index: 4;
 }
@@ -386,13 +377,6 @@
   margin: 0;
   transform: none;
   padding: 4px 0;
-}
-.call-page .demo-action {
-  width: auto;
-  min-height: 36px;
-  align-self: center;
-  padding-block: 4px;
-  font-size: 13px;
 }
 .call-page[data-phase="summary"] .controls {
   margin-top: 0;

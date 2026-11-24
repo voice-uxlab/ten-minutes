@@ -1,10 +1,9 @@
 import type { Profile, Session } from "@/api/types";
-const initial: Profile = { nick: "", tickets: 0, freeUsed: false, bgm: false };
 export function profile(): Profile {
   try {
-    return { ...initial, ...JSON.parse(localStorage.getItem("queen") || "{}") };
+    return JSON.parse(localStorage.getItem("queen") || "{}") || {};
   } catch {
-    return { ...initial };
+    return {};
   }
 }
 export function saveProfile(p: Profile) {
@@ -34,12 +33,14 @@ export function localReports(): Session[] {
     const key = localStorage.key(index);
     if (!key?.startsWith(prefix)) continue;
     const session = loadSession(key.slice(prefix.length));
-    if (session?.report && session.ended) reports.push(session);
+    if (session?.report && session.ended && !session.demo)
+      reports.push(session);
   }
   const previous = profile().last;
   if (
     previous?.report &&
     previous.ended &&
+    !previous.demo &&
     !reports.some((session) => session.readingId === previous.readingId)
   ) {
     reports.push(previous);

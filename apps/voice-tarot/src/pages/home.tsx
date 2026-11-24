@@ -1,5 +1,3 @@
-import { exportSavedConversations } from "@/features/consultation/test-logger";
-import { personas, type PersonaId } from "../../shared/personas.ts";
 import {
   prepareAudio,
   discardPreparedAudio,
@@ -16,7 +14,7 @@ import {
   saveMemberProfile,
 } from "@/api/auth";
 import { emptyReading, type Session } from "@/api/types";
-import { profile, saveProfile, saveSession } from "@/lib/storage";
+import { saveSession } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PolicyDialog } from "@/components/ui/dialog";
@@ -164,40 +162,29 @@ function Login({ checking = false }: { checking?: boolean }) {
                 ? "로그인을 취소했어요."
                 : "소셜 로그인을 완료할 수 없습니다."}
             </strong>
-            <span>다시 시도하거나 닉네임으로 체험할 수 있습니다.</span>
+            <span>다시 로그인해 주세요.</span>
           </p>
         )}
-        <Button asChild variant="ghost">
-          <Link
-            to="/onboarding"
-            onClick={() => sessionStorage.removeItem(loginAttemptKey)}
-          >
-            닉네임으로 체험하기
-          </Link>
-        </Button>
       </div>
       <div className="login-policies">
         <PolicyDialog title="이용약관">
-          데모 이용 안내입니다. 타로는 선택을 돕는 참고용 상담이에요. 데모
-          이용권에는 실제 결제가 없어요.
+          타로는 선택을 돕는 참고용 상담이에요.
         </PolicyDialog>
         <span aria-hidden="true">·</span>
         <PolicyDialog title="개인정보처리방침">
-          데모 개인정보 처리 안내입니다. 상담 음성은 OpenAI에, AI 답변 텍스트는
-          Typecast에 전송해요. 상담 요약은 이 브라우저에, 질문과 카드는
-          이어보기를 위해 앱 서버에 보관해요.
+          상담 음성은 OpenAI에, AI 답변 텍스트는 Typecast에 전송해요. 상담
+          요약은 이 브라우저에, 질문과 카드는 이어보기를 위해 앱 서버에
+          보관해요.
         </PolicyDialog>
       </div>
     </section>
   );
 }
 export function Onboarding() {
-  const member =
-    new URLSearchParams(useLocation().search).get("mode") === "member";
-  const [nick, setNick] = useState(() => (member ? "" : profile().nick)),
-    navigate = useNavigate();
+  const [nick, setNick] = useState("");
+  const navigate = useNavigate();
   const [customName, setCustomName] = useState(false);
-  const auth = useQuery({ ...authOptions, enabled: member });
+  const auth = useQuery(authOptions);
   const queryClient = useQueryClient();
   const saveMember = useMutation({
     mutationFn: saveMemberProfile,
@@ -206,19 +193,18 @@ export function Onboarding() {
       navigate("/", { replace: true });
     },
   });
-  if (member && auth.isPending) {
+  if (auth.isPending) {
     return <p role="status">로그인 상태를 확인하고 있어요.</p>;
   }
-  if (member && auth.isError) {
+  if (auth.isError) {
     return (
       <p role="alert">
         로그인 상태를 확인하지 못했어요. <Link to="/login">로그인 화면</Link>
       </p>
     );
   }
-  if (member && !auth.data) return <Navigate to="/login" replace />;
-  if (member && !auth.data?.onboarding_required)
-    return <Navigate to="/" replace />;
+  if (!auth.data) return <Navigate to="/login" replace />;
+  if (!auth.data?.onboarding_required) return <Navigate to="/" replace />;
   return (
     <section className="page">
       <h1>만나서 반가워, 공주야.</h1>
@@ -226,51 +212,43 @@ export function Onboarding() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (member) {
-              if (saveMember.isPending || (customName && !nick.trim())) return;
-              saveMember.mutate(
-                customName
-                  ? { addressing_mode: "CUSTOM", nickname: nick.trim() }
-                  : { addressing_mode: "DEFAULT", nickname: null },
-              );
-              return;
-            }
-            if (!nick.trim()) return;
-            saveProfile({ ...profile(), nick: nick.trim() });
-            navigate("/");
+            if (saveMember.isPending || (customName && !nick.trim())) return;
+            saveMember.mutate(
+              customName
+                ? { addressing_mode: "CUSTOM", nickname: nick.trim() }
+                : { addressing_mode: "DEFAULT", nickname: null },
+            );
           }}
         >
-          {member ? (
-            <fieldset>
-              <legend>호칭 선택</legend>
-              <label className="consent">
-                <input
-                  type="radio"
-                  name="addressing-mode"
-                  checked={!customName}
-                  onChange={() => setCustomName(false)}
-                />{" "}
-                기본 호칭 (공주)
-              </label>
-              <label className="consent">
-                <input
-                  type="radio"
-                  name="addressing-mode"
-                  checked={customName}
-                  onChange={() => setCustomName(true)}
-                />{" "}
-                닉네임으로 불리기
-              </label>
-            </fieldset>
-          ) : null}
-          {!member || customName ? (
+          <fieldset>
+            <legend>호칭 선택</legend>
+            <label className="consent">
+              <input
+                type="radio"
+                name="addressing-mode"
+                checked={!customName}
+                onChange={() => setCustomName(false)}
+              />{" "}
+              기본 호칭 (공주)
+            </label>
+            <label className="consent">
+              <input
+                type="radio"
+                name="addressing-mode"
+                checked={customName}
+                onChange={() => setCustomName(true)}
+              />{" "}
+              닉네임으로 불리기
+            </label>
+          </fieldset>
+          {customName ? (
             <>
               <label htmlFor="nick">닉네임</label>
               <Input
                 id="nick"
                 value={nick}
                 onChange={(e) => setNick(e.target.value)}
-                maxLength={member ? 40 : 20}
+                maxLength={40}
                 required
               />
               <Button
@@ -291,12 +269,10 @@ export function Onboarding() {
           <label className="consent">
             <input type="checkbox" required /> 만 14세 이상이에요.
           </label>
-          {member ? (
-            <label className="consent">
-              <input type="checkbox" required /> {aiProcessing}
-            </label>
-          ) : null}
-          {member && !consentVersion ? (
+          <label className="consent">
+            <input type="checkbox" required /> {aiProcessing}
+          </label>
+          {!consentVersion ? (
             <p role="alert">회원 가입 설정을 확인해 주세요.</p>
           ) : null}
           {saveMember.error ? (
@@ -304,7 +280,7 @@ export function Onboarding() {
           ) : null}
           <Button
             size="wide"
-            disabled={member && (saveMember.isPending || !consentVersion)}
+            disabled={saveMember.isPending || !consentVersion}
           >
             {saveMember.isPending ? "저장 중…" : "레나 만나러 가기"}
           </Button>
@@ -313,24 +289,15 @@ export function Onboarding() {
     </section>
   );
 }
-export function Home({
-  voiceEngine: initialVoiceEngine = "realtime",
-}: {
-  voiceEngine?: Session["voiceEngine"];
-}) {
+export function Home() {
   const navigate = useNavigate(),
-    [p, setP] = useState(profile),
-    [voiceEngine, setVoiceEngine] = useState(initialVoiceEngine),
-    [personaId, setPersonaId] = useState<PersonaId>("cool-unnie"),
     [mic, setMic] = useState(false),
     [microphoneDenied, setMicrophoneDenied] = useState(false),
     [showPrivacy, setShowPrivacy] = useState(false),
     [menu, setMenu] = useState(false),
     [consent, setConsent] = useState(false),
     [record, setRecord] = useState(false),
-    [error, setError] = useState(""),
-    [exporting, setExporting] = useState(false),
-    [exportStatus, setExportStatus] = useState("");
+    [error, setError] = useState("");
   const { pathname, search } = useLocation();
   const isLogin = pathname.toLowerCase().replace(/\/+$/, "") === "/login";
   const queryClient = useQueryClient();
@@ -347,26 +314,23 @@ export function Home({
   const signOut = useMutation({
     mutationFn: logout,
     onSuccess: () => {
-      saveProfile({ ...profile(), nick: "" });
-      setP(profile());
       queryClient.setQueryData(authOptions.queryKey, null);
       navigate("/login", { replace: true });
     },
   });
   const starting = useRef(false);
   const create = useMutation({
-    mutationFn: async (demo: boolean) => {
+    mutationFn: async () => {
       const data = await readingRequest({
         action: "create",
         masterId: "adaptive",
-        personaId,
       });
       const session: Session = {
         ...emptyReading,
         ...data.state,
         readingId: data.id,
-        demo,
-        voiceEngine,
+        demo: false,
+        voiceEngine: "realtime",
         transcript: [],
         notes: [],
         date: new Date().toISOString(),
@@ -383,12 +347,12 @@ export function Home({
         state: { start: true, record, consent },
       }),
   });
-  function begin(demo: boolean) {
+  function begin() {
     if (starting.current) return;
     starting.current = true;
     try {
-      if (!demo) prepareAudio();
-      create.mutate(demo);
+      prepareAudio();
+      create.mutate();
     } catch (e) {
       starting.current = false;
       discardPreparedAudio();
@@ -397,9 +361,9 @@ export function Home({
   }
   const hasAuthError = new URLSearchParams(search).has("auth_error");
   if (!isLogin && !hasAuthError && auth.data?.onboarding_required) {
-    return <Navigate to="/onboarding?mode=member" replace />;
+    return <Navigate to="/onboarding" replace />;
   }
-  const nick = auth.data ? auth.data.nickname || "공주" : p.nick;
+  const nick = auth.data && (auth.data.nickname || "공주");
   if (isLogin || hasAuthError || !nick) {
     const checking = !isLogin && !hasAuthError && auth.isPending;
     return (
@@ -473,7 +437,7 @@ export function Home({
           <h2>마이크 허용과 녹음 저장은 별개예요</h2>
           <p>
             녹음은 내 마이크에만 적용돼요. 녹음을 선택하면 종료 후 파일로 저장할
-            수 있고, 로컬 테스트에서는 서버에도 저장해요.
+            수 있어요.
           </p>
           <h2>상담 기록은 어디에 남나요?</h2>
           <p>
@@ -598,163 +562,20 @@ export function Home({
         size="wide"
         variant="primary"
         disabled={!mic || !consent || create.isPending}
-        onClick={() => {
-          if (p.freeUsed && p.tickets < 1) {
-            navigate("/tickets");
-            return;
-          }
-          begin(false);
-        }}
+        onClick={begin}
       >
-        {create.isPending
-          ? "상담 준비 중…"
-          : `☎ ${p.freeUsed ? "이용권으로 10분 상담 시작하기" : "첫 상담 5분 시작하기"}`}
+        {create.isPending ? "상담 준비 중…" : "☎ 10분 상담 시작하기"}
       </Button>
       <p className="hint">
         {mic && consent
           ? "준비됐어, 공주야. 편하게 시작해."
           : "마이크와 음성 처리에 동의하면 시작할 수 있어요."}
       </p>
-      <details
-        className="home-options"
-        open={initialVoiceEngine === "live-typecast" || undefined}
-      >
-        <summary>상담 옵션</summary>
-        <fieldset
-          className="panel consultation-options"
-          disabled={create.isPending}
-        >
-          <legend>상담 버전 선택</legend>
-          <label className="consent">
-            <input
-              type="radio"
-              name="voice-engine"
-              value="realtime"
-              checked={voiceEngine === "realtime"}
-              onChange={() => setVoiceEngine("realtime")}
-            />
-            Realtime + Typecast
-          </label>
-          <label className="consent">
-            <input
-              type="radio"
-              name="voice-engine"
-              value="live-typecast"
-              checked={voiceEngine === "live-typecast"}
-              onChange={() => setVoiceEngine("live-typecast")}
-            />
-            Live + Typecast
-          </label>
-          <p className="hint">
-            둘 다 레나의 목소리 · 1.3배속이에요. 새 통화에 선택한 버전을
-            적용해요.
-          </p>
-        </fieldset>
-        <fieldset
-          className="panel consultation-options"
-          disabled={create.isPending}
-        >
-          <legend>테스트 · 페르소나 선택</legend>
-          {personas.map((persona) => (
-            <label className="consent" key={persona.id}>
-              <input
-                type="radio"
-                name="persona"
-                checked={personaId === persona.id}
-                onChange={() => setPersonaId(persona.id)}
-              />
-              {persona.label}
-            </label>
-          ))}
-          <p className="hint">
-            새 음성 통화에 적용돼요. 이어보기는 기존 선택을 유지하고, 시범
-            통화는 고정 예시예요.
-          </p>
-        </fieldset>
-      </details>
-      {import.meta.env.DEV ? (
-        <details className="home-options">
-          <summary>테스트 대화 로그</summary>
-          <Panel title="테스트 대화 로그">
-            <p>
-              새 음성 통화는 대화·도구·재생 이벤트를 로컬 서버의 .test-logs
-              폴더에 자동 저장해요.
-            </p>
-            <Button
-              disabled={exporting}
-              onClick={async () => {
-                setExporting(true);
-                setExportStatus("");
-                try {
-                  const count = await exportSavedConversations();
-                  setExportStatus(`이전 대화 ${count}개를 .md로 저장했어요.`);
-                } catch {
-                  setExportStatus(
-                    "일부 로그 저장에 실패했어요. 로컬 서버 연결을 확인해 주세요.",
-                  );
-                } finally {
-                  setExporting(false);
-                }
-              }}
-            >
-              {exporting ? "저장 중…" : "이 브라우저의 이전 대화도 .md로 저장"}
-            </Button>
-            <p role="status">{exportStatus}</p>
-          </Panel>
-        </details>
-      ) : null}
-      <div className="extras">
-        <Button
-          variant="ghost"
-          disabled={create.isPending}
-          onClick={() => begin(true)}
-        >
-          시범 통화
-        </Button>
-        {p.last ? (
-          <Link
-            to={`/sessions/${p.last.readingId}${p.last.ended ? "/report" : ""}`}
-          >
-            지난 상담
-          </Link>
-        ) : null}
-        <Link to="/tickets">데모 이용권 추가</Link>
-        <span>이용권 {p.tickets}장</span>
-      </div>
       {error || create.error ? (
         <p role="alert" className="error-message">
           {error || create.error?.message}
         </p>
       ) : null}
-    </section>
-  );
-}
-export function Tickets() {
-  const navigate = useNavigate(),
-    [busy, setBusy] = useState(false);
-  return (
-    <section className="page">
-      <h1>언니와 조금 더 얘기할까?</h1>
-      <Panel title="데모 이용권">
-        <p>10분 상담 이용권 1장</p>
-        <p>실제 결제는 없어요. 이 기기에 저장되는 체험용 이용권이에요.</p>
-        <Button
-          disabled={busy}
-          size="wide"
-          onClick={() => {
-            setBusy(true);
-            const p = profile();
-            saveProfile({ ...p, tickets: p.tickets + 1 });
-            navigate("/payments/result", {
-              replace: true,
-              state: { demoGranted: true },
-            });
-          }}
-        >
-          데모 이용권 받기
-        </Button>
-      </Panel>
-      <Link to="/">홈으로</Link>
     </section>
   );
 }

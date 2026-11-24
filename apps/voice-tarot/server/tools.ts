@@ -68,7 +68,6 @@ export const tools = [
       },
     },
   ),
-  tool("extend_call", "사용자가 동의하면 이용권 1장으로 10분 연장한다."),
   tool(
     "end_call",
     "사용자가 종료를 요청하거나 마지막 인사를 마치면 통화를 끝낸다.",
