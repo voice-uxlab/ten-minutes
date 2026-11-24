@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./poc.css";
+@import "./metallic.css";
 @theme {
   --color-background: #171619;
   --color-foreground: #f8f4f5;
@@ -25,7 +26,7 @@ button,
 a {
   touch-action: manipulation;
 }
-.page {
+.page:where(:not(.metallic-page, .landing)) {
   min-height: calc(100dvh - 40px);
 }
 .slots:empty {

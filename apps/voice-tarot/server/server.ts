@@ -1,6 +1,3 @@
-import { handleTestLogs } from "./test-logs.ts";
-import { handleLive } from "./live.ts";
-import { defaults, applyVoiceSettings } from "./voice-settings.ts";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
@@ -8,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { attachSpeechSocket } from "./speech-socket.ts";
 import { cards } from "../shared/cards.ts";
 import { getInstructions } from "./instructions.ts";
-import { voiceProtocol, actingInstructions } from "./voice-protocol.ts";
 import { ttsConfig } from "./tts-config.ts";
 export function shuffle() {
   const deck = cards.map((c) => ({ ...c, reversed: Boolean(randomInt(2)) }));
@@ -37,20 +33,7 @@ export const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", "http://localhost"),
       path = url.pathname;
-    if (await handleTestLogs(req, res, url, readings)) return;
     if (await handleAuth(req, res, url)) return;
-    if (req.method === "GET" && path === "/voice-settings") {
-      const tts = ttsConfig();
-      return reply(200, {
-        provider: tts.provider,
-        keyConfigured: !!process.env.TYPECAST_API_KEY,
-        settings: tts.settings || {
-          ...defaults,
-          voice: process.env.TYPECAST_VOICE_ID || "",
-          model: process.env.TYPECAST_MODEL || defaults.model,
-        },
-      });
-    }
     if (req.method === "POST") {
       if (
         req.headers.origin &&
@@ -58,29 +41,6 @@ export const server = createServer(async (req, res) => {
         req.headers.origin !== `https://${req.headers.host}`
       )
         return reply(403, { error: "허용되지 않은 요청입니다." });
-      if (await handleLive(req, res, path, readings)) return;
-      if (path === "/voice-settings") {
-        if (!process.env.TYPECAST_API_KEY)
-          return reply(503, {
-            error: "서버 .env에 TYPECAST_API_KEY를 설정해 주세요.",
-          });
-        let raw = "";
-        for await (const chunk of req) {
-          raw += chunk;
-          if (Buffer.byteLength(raw) > 4096)
-            return reply(413, { error: "설정이 너무 커요." });
-        }
-        try {
-          return reply(200, {
-            settings: applyVoiceSettings(JSON.parse(raw)),
-            provider: "typecast",
-          });
-        } catch (e) {
-          return reply(400, {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      }
       if (path === "/reading") {
         let raw = "";
         for await (const chunk of req) {
@@ -128,7 +88,8 @@ export const server = createServer(async (req, res) => {
         if (tts.error) return reply(503, { error: tts.error });
         if (!process.env.OPENAI_API_KEY)
           return reply(503, {
-            error: "OPENAI_API_KEY가 없어 시범 통화만 이용할 수 있어요.",
+            error:
+              "음성 상담을 시작하려면 서버에 OPENAI_API_KEY를 설정해 주세요.",
           });
         const upstream = await fetch(
           "https://api.openai.com/v1/realtime/client_secrets",
@@ -143,13 +104,7 @@ export const server = createServer(async (req, res) => {
               session: {
                 type: "realtime",
                 model: process.env.REALTIME_MODEL || "gpt-realtime-2.1",
-                instructions:
-                  instructions +
-                  flowInstructions +
-                  (tts.provider === "elevenlabs" &&
-                  voiceProtocol(tts.model, "").dialogue
-                    ? actingInstructions
-                    : ""),
+                instructions: instructions + flowInstructions,
                 tools,
                 output_modalities: ["text"],
                 audio: {
@@ -189,17 +144,15 @@ export const server = createServer(async (req, res) => {
     }
     // Production SPA assets are restricted to the build directory; never serve env/source files.
     if (process.env.SERVE_REACT === "1" && req.method === "GET") {
-      const asset = /^\/assets\/[a-zA-Z0-9_.-]+$/.test(path);
+      const asset =
+        /^\/assets\/(?:metallic\/)?[a-zA-Z0-9_.-]+$/.test(path) ||
+        /^\/cards\/tarot\/(?:major|minor)-[a-z0-9-]+\.webp$/.test(path) ||
+        path === "/fonts/PretendardVariable.woff2";
       const route =
         path === "/" ||
-        [
-          "/login",
-          "/onboarding",
-          "/tickets",
-          "/payments/result",
-          "/screens",
-          "/live-lab",
-        ].includes(path) ||
+        ["/login", "/onboarding", "/reports", "/invite/christmas"].includes(
+          path,
+        ) ||
         /^\/sessions\/[a-f0-9]{48}(?:\/report)?$/.test(path);
       if (asset || route) {
         try {
@@ -215,6 +168,8 @@ export const server = createServer(async (req, res) => {
                   js: "text/javascript",
                   css: "text/css",
                   png: "image/png",
+                  webp: "image/webp",
+                  woff2: "font/woff2",
                   html: "text/html; charset=utf-8",
                 } as Record<string, string>
               )[ext || ""] || "application/octet-stream",
@@ -225,47 +180,6 @@ export const server = createServer(async (req, res) => {
           return reply(404, { error: "프론트엔드를 먼저 빌드해 주세요." });
         }
       }
-    }
-    const files: Record<string, string> = {
-      "/screens": "screens.html",
-      "/screens.js": "screens.js",
-      "/ui.mjs": "ui.mjs",
-      "/selection.mjs": "selection.mjs",
-      "/spreads.mjs": "spreads.mjs",
-      "/conversation-notes.mjs": "conversation-notes.mjs",
-      "/voice-lab": "voice-lab.html",
-      "/voice-lab.js": "voice-lab.js",
-      "/voice-lab.css": "voice-lab.css",
-      "/": "index.html",
-      "/app.js": "app.js",
-      "/style.css": "style.css",
-      "/state.mjs": "state.mjs",
-      "/speech.mjs": "speech.mjs",
-    };
-    if (req.method === "GET" && /^\/assets\/[a-z0-9-]+\.png$/.test(path)) {
-      try {
-        const data = await readFile(new URL("../poc" + path, import.meta.url));
-        res.writeHead(200, {
-          "Content-Type": "image/png",
-          "Cache-Control": "public, max-age=3600",
-        });
-        return res.end(data);
-      } catch {
-        return reply(404, { error: "Not found" });
-      }
-    }
-    if (req.method === "GET" && files[path]) {
-      res.writeHead(200, {
-        "Content-Type": path.endsWith(".css")
-          ? "text/css"
-          : path.endsWith(".js") || path.endsWith(".mjs")
-            ? "text/javascript"
-            : "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      return res.end(
-        await readFile(new URL("../poc/" + files[path], import.meta.url)),
-      );
     }
     reply(404, { error: "Not found" });
   } catch {

@@ -9,19 +9,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: Object.fromEntries(
-      [
-        "/test-logs",
-        "/test-recording",
-        "/live-session",
-        "/live-report",
-        "/reading",
-        "/session$",
-        "/auth",
-        "/voice-settings",
-        "/voice-lab",
-        "/speech",
-        "/research",
-      ].map((path) => [
+      ["/reading", "/session$", "/auth", "/speech", "/research"].map((path) => [
         path === "/session$" ? "^/session$" : path,
         { target: "http://127.0.0.1:3011", ws: path === "/speech" },
       ]),
