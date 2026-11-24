@@ -21,6 +21,15 @@ const TarotCard = memo(function TarotCard({
 }) {
   const reduced = useReducedMotion();
   const artwork = art[card.name || ""];
+  const assetCode = card.code?.replace(
+    /^(wands|cups|swords|pentacles)-([a-z0-9]+)$/,
+    (_, suit: string, rank: string) =>
+      `minor-${suit}-${rank === "ace" ? "1" : rank}`,
+  );
+  const serverCardImage =
+    assetCode && /^(major|minor)-[a-z0-9-]+$/.test(assetCode)
+      ? `/cards/tarot/${assetCode}.webp`
+      : undefined;
   return (
     <div className={"card-wrap" + (active ? " active" : "")} hidden={hidden}>
       <motion.div
@@ -40,6 +49,8 @@ const TarotCard = memo(function TarotCard({
                 src={`/assets/${artwork.image}.png`}
                 alt={card.name}
               />
+            ) : serverCardImage ? (
+              <img className="symbol" src={serverCardImage} alt={card.name} />
             ) : (
               <span className="symbol">✦</span>
             )}

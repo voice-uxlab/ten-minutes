@@ -87,13 +87,16 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 `PATCH /api/v1/users/me`에서 사용자가 `CUSTOM`을 선택했을 때만 저장하며, Provider 이메일은
 현재 수집하거나 저장하지 않습니다.
 
+음성 상담은 `OPENAI_API_KEY`, `TYPECAST_API_KEY`, `TYPECAST_VOICE_ID`를 백엔드에서 읽습니다. 모델은 `OPENAI_REALTIME_MODEL`과 `TYPECAST_MODEL`로 설정합니다.
+
 ## 구현된 API 범위
 
 - 카카오/네이버 OAuth, HttpOnly 서비스 세션, 로그아웃, 사용자 설정
 - 상담 생성/목록/조회/종료
 - 78장 서버 덱, 4개 스프레드, 중복 없는 3장 확정, 카드 순차 공개
-- OpenAI Realtime client secret 발급, Typecast 스트리밍 프록시
-- 상담 이벤트, 개인 리포트 저장/조회
+- OpenAI Realtime 임시 키와 상담 도구, Typecast 1.3배 WAV 스트리밍 프록시
+- 상담 생성 시각 기준 10분 제한과 같은 상담으로 재연결
+- 상담 이벤트, 공개된 카드 기준으로 조기 종료 리포트 저장/조회
 - 후킹 문구 기반 공유 링크 생성과 공유 미리보기 조회
 
 공개 공유 API는 질문, 카드, 카드별 해석, 상황 요약, “언니”의 한마디를 반환하지 않습니다. 개인 리포트 전문은 인증된 상담 소유자만 조회할 수 있습니다.

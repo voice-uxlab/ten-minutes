@@ -8,7 +8,7 @@ function setup(sampleRate=24000,options={}){
  const player=new SpeechPlayer(context,{socketFactory:()=>socket,onError:e=>errors.push(e.message),...options});
  const connected=player.connect('ws://test/speech');
  const receive=data=>socket.onmessage({data:JSON.stringify(data)});
- receive({type:'ready',sampleRate});
+ if (!options.streamSegment) receive({type:'ready',sampleRate});
  const audio=(id,bytes)=>receive({type:'audio',id,audio:Buffer.from(bytes).toString('base64')});
  return {player,context,socket,sent,errors,played,receive,audio,connected};
 }
@@ -69,4 +69,53 @@ test('playback notification waits for scheduled audio time and cancel clears fut
  assert.equal(starts,0);
  s.context.currentTime=.025;t.mock.timers.tick(25);assert.equal(starts,1);
  s.player.cancel();s.context.currentTime=2;t.mock.timers.tick(2000);assert.equal(starts,1);
+});
+
+test("FastAPI audio handles a split WAV header, plays before EOF and cancels old segments", async (t) => {
+  const streams = [];
+  const s = setup(32000, {
+    streamSegment: async (text, responseId, index, signal) =>
+      new Response(new ReadableStream({
+        start(stream) {
+          streams.push({ text, responseId, index, signal, stream });
+          signal.addEventListener("abort", () => stream.error(signal.reason), { once: true });
+        },
+      })),
+  });
+  t.after(() => s.player.close());
+  await s.connected;
+  const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(32000, 24);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+
+  s.player.append("첫 문장이야.", true, "response-1");
+  s.player.append("대기 중인 문장이야.", true, "response-1");
+  const first = streams[0];
+  assert.equal(first.index, 0);
+  first.stream.enqueue(header.subarray(0, 20));
+  first.stream.enqueue(Buffer.concat([header.subarray(20), Buffer.from([0, 64])]));
+  await nextTurn();
+  assert.equal(s.played[0].buffer.duration, 1 / 32000);
+  assert.equal(s.played[0].buffer.getChannelData(0)[0], .5);
+  s.player.cancel();
+  assert.equal(first.signal.aborted, true);
+  assert.equal(s.played[0].stopped, true);
+  s.player.append("새 답변이야.", true, "response-2");
+  await nextTurn();
+  assert.deepEqual(streams.map(({ text, responseId, index }) => [text, responseId, index]), [
+    ["첫 문장이야.", "response-1", 0],
+    ["새 답변이야.", "response-2", 0],
+  ]);
+  streams[1].stream.enqueue(Buffer.concat([header, Buffer.from([0, 64])]));
+  streams[1].stream.close();
+  await nextTurn();
+  assert.equal(s.played.length, 2);
+  assert.deepEqual(s.errors, []);
 });

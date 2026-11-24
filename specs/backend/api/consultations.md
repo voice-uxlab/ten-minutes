@@ -28,7 +28,7 @@
 }
 ```
 
-카드 수와 덱 크기는 FE가 보내지 않고 서버의 상담 시나리오 설정으로 정한다.
+카드 수와 덱 크기는 서버가 정한다. `call_ends_at`은 상담 생성 후 10분이며 같은 ID로 다시 연결해도 유지된다.
 
 **Response `201` — `ConsultationResponse`**
 
@@ -42,7 +42,8 @@
   "cards": [],
   "report_status": null,
   "created_at": "2026-11-12T10:00:00Z",
-  "ended_at": null
+  "ended_at": null,
+  "call_ends_at": "2026-11-12T10:10:00Z"
 }
 ```
 
@@ -135,7 +136,7 @@
 }
 ```
 
-`expires_at`은 OpenAI 응답 형식에 맞춘 Unix timestamp 정수다. client secret은 로그나 DB에 저장하지 않는다.
+`expires_at`은 OpenAI 임시 키 만료 시각을 나타내는 Unix timestamp다. 임시 키는 로그나 DB에 저장하지 않는다. Realtime 설정은 텍스트 출력과 상담 도구를 포함한다. 서버의 `call_ends_at` 이후에는 키를 발급할 수 없다.
 
 ### 2.2 Typecast 음성 합성
 
@@ -155,12 +156,12 @@
 |---|---|---|
 | `response_id` | `str` | OpenAI 응답과 재생 순서 연결 |
 | `segment_index` | `int` | 0 이상 |
-| `text` | `str` | 글자 수 제한 **TBD** |
+| `text` | `str` | 1–500자 |
 
 **Response `200`**
 
 - `StreamingResponse`
-- `Content-Type`: 실제 Typecast 출력 포맷 검증 후 **TBD**
+- `Content-Type`: `audio/wav` 스트림, 합성 속도 1.3배
 - JSON body 없음
 
 활성 상담의 소유자만 호출할 수 있다. 모델과 voice ID는 서버 설정에서 정하며 요청 body로 받지 않는다. 상담별 글자 수, 호출 빈도, 동시 합성 수 제한은 **TBD**다. 텍스트와 생성 오디오는 DB나 로그에 저장하지 않는다.
@@ -286,7 +287,7 @@ slot 1부터 순서대로 공개한다. 이미 공개한 slot은 같은 결과�
 
 ```json
 {
-  "summary": "세 장의 카드는 자신의 기준을 살피라고 말해.",
+  "situation_summary": "세 장의 카드는 자신의 기준을 살피라고 말해.",
   "readings": [
     {"slot": 1, "text": "첫 번째 카드 해석"}
   ],
@@ -294,7 +295,7 @@ slot 1부터 순서대로 공개한다. 이미 공개한 slot은 같은 결과�
 }
 ```
 
-`readings`의 slot은 공개된 카드와 일치해야 한다. 문자열과 배열의 최대 길이는 **TBD**다. 질문과 카드 정보는 요청 body에서 받지 않고 서버에 저장된 값을 사용한다.
+`readings`의 slot은 공개된 카드와 일치해야 한다. 통화가 종료됐다면 일부 카드 또는 카드가 없는 상태에서도 요약을 저장할 수 있다. 상황 요약은 최대 500자, 해석은 카드별 최대 1,000자, 마무리는 최대 300자다. 질문과 카드 정보는 서버 기록을 사용한다.
 
 **Response:** `201` 최초 저장, `200` 동일 결과 재요청 — `ReportResponse`  
 **주요 오류:** `409 CARDS_NOT_FULLY_REVEALED`, `422 VALIDATION_ERROR`

@@ -32,7 +32,7 @@ markers = [
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["prompts/*.md"]
+app = ["prompts/*.md", "prompts/*.json"]
 
 [tool.vercel]
 entrypoint = "app.main:app"

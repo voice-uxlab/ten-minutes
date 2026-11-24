@@ -1,4 +1,3 @@
-import { emptyReading } from "@/api/types";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import {
   act,
@@ -11,13 +10,8 @@ import {
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { App } from "./app";
-import { profile, loadSession, saveSession } from "@/lib/storage";
+import { loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
-import { ReadingStore } from "../../server/reading-store.ts";
-import { cards } from "../../shared/cards.ts";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 vi.mock("@/features/consultation/speech.ts", () => ({
   displaySpeech: (text: string) => text,
   SpeechPlayer: class {
@@ -26,33 +20,24 @@ vi.mock("@/features/consultation/speech.ts", () => ({
     close() {}
   },
 }));
-let dir: string, creates: number;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "react-ui-"));
-  const store = new ReadingStore(dir, () =>
-    cards.map((c) => ({ ...c, reversed: false })),
-  );
-  creates = 0;
+const consultationId = "12345678-1234-4321-8123-123456789abc";
+const consultPath = "/api/v1/consultations";
+const userPath = "/api/v1/users/me";
+
+beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   history.replaceState({}, "", "/");
   queryClient.clear();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (path: string, options?: RequestInit) => {
-      if (path === "/auth/me")
-        return Response.json({ providers: {}, user: null });
-      const body = JSON.parse(String(options?.body));
-      if (body.action === "create") creates++;
-      return Response.json(await store.request(body));
-    }),
+    vi.fn(async () => Response.json({}, { status: 401 })),
   );
 });
-afterEach(async () => {
+afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(navigator, "mediaDevices");
-  await rm(dir, { recursive: true, force: true });
 });
 test("home silently checks auth and opens login when the lookup fails", async () => {
   vi.mocked(fetch).mockImplementation(async () =>
@@ -95,7 +80,7 @@ test.each(["responds", "times out"])(
 
       if (outcome === "responds") {
         await act(async () => {
-          respond?.(Response.json({ user: null }));
+          respond?.(Response.json({}, { status: 401 }));
           await vi.advanceTimersByTimeAsync(1);
         });
       } else {
@@ -149,7 +134,7 @@ test("returning to the login page after leaving for OAuth restores retry", async
 test("a confirmed social login is marked on later visits to login", async () => {
   sessionStorage.setItem("voice-tarot:login-attempt", "kakao");
   vi.mocked(fetch).mockImplementation(async () =>
-    Response.json({ user: { nickname: "테스트 공주", provider: "kakao" } }),
+    Response.json({ nickname: "테스트 공주", provider: "kakao" }),
   );
   const app = render(<App />);
   await screen.findByRole("heading", { name: "테스트 공주야, 안녕!" });
@@ -163,17 +148,66 @@ test("a confirmed social login is marked on later visits to login", async () => 
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
+test("a logged-in user with older consent is sent to onboarding", async () => {
+  vi.mocked(fetch).mockImplementation(async () =>
+    Response.json({
+      nickname: "공주",
+      consent_version: "older-version",
+      onboarding_required: false,
+    }),
+  );
+  render(<App />);
+  await screen.findByRole("heading", { name: /만나서 반가워/ });
+  expect(location.pathname).toBe("/onboarding");
+});
+
 test("authenticated StrictMode: real call entry, partial picks and same-session reload", async () => {
   const user = userEvent.setup();
-  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
-  vi.mocked(fetch).mockImplementation((path, options) => {
-    if (path === "/auth/me")
-      return Promise.resolve(Response.json({ user: { nickname: "공주" } }));
-    if (path === "/session")
-      return Promise.resolve(Response.json({ value: "test-token" }));
+  const now = Date.now();
+  const consultation = {
+    id: consultationId,
+    status: "CREATED",
+    question: null,
+    spread_type: null,
+    created_at: new Date(now).toISOString(),
+    call_ends_at: new Date(now + 600000).toISOString(),
+    cards: [],
+  };
+  vi.mocked(fetch).mockImplementation(async (path, options) => {
+    if (path === userPath) return Response.json({ nickname: "공주" });
+    if (path === consultPath && options?.method === "POST") {
+      expect(JSON.parse(String(options.body))).toEqual({
+        consent_version: "2026-11",
+      });
+      return Response.json(consultation);
+    }
+    if (path === `${consultPath}/${consultationId}`)
+      return Response.json(consultation);
+    if (path === `${consultPath}/${consultationId}/realtime-credentials`) {
+      consultation.status = "CONNECTING";
+      return Response.json({ client_secret: "test-token" });
+    }
+    if (path === `${consultPath}/${consultationId}/card-selection`) {
+      expect(JSON.parse(String(options?.body))).toMatchObject({
+        spread_type: "RELATIONSHIP",
+        picks: [7, 22, 51],
+      });
+      return Response.json({
+        cards: [7, 22, 51].map((picked_number, index) => ({
+          slot: index + 1,
+          picked_number,
+          position: ["나", "상대", "관계 흐름"][index],
+          revealed: false,
+          card_id: null,
+          card_code: null,
+          name: null,
+          keywords: null,
+        })),
+      });
+    }
     if (String(path).startsWith("https://api.openai.com/"))
-      return Promise.resolve(new Response("answer"));
-    return originalFetch(path, options);
+      return new Response("answer");
+    throw Error(`Unexpected request: ${path}`);
   });
   const audioTrack = { stop: vi.fn(), enabled: true };
   Object.defineProperty(navigator, "mediaDevices", {
@@ -236,9 +270,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   await user.click(screen.getByLabelText("22번 카드"));
   await screen.findByText(/1개만 더/);
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(2);
-  expect(creates).toBe(1);
-  const reading = loadSession(profile().last!.readingId)!;
-  expect(reading.voiceEngine).toBe("realtime");
+  const reading = loadSession(consultationId)!;
   expect(reading.demo).toBe(false);
   expect(reading.endAt! - Date.now()).toBeGreaterThan(590000);
   expect(vi.mocked(fetch).mock.calls.map(([path]) => path)).not.toContain(
@@ -252,29 +284,63 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
       <App />
     </StrictMode>,
   );
-  await screen.findByRole("button", { name: "상담 연결하기" });
-  expect(creates).toBe(1);
+  await user.click(await screen.findByLabelText(/음성은 OpenAI로/));
+  await user.click(screen.getByRole("button", { name: "상담 연결하기" }));
+  await screen.findByText(/1개만 더/);
+  await user.click(await screen.findByText("직접 번호 고르기"));
+  await user.click(await screen.findByLabelText("51번 카드"));
+  await user.click(await screen.findByText("응, 이 3장을 열어줘"));
+  await screen.findByRole("heading", { name: /공주가 고른 카드를/ });
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.filter(
+        ([path, options]) => path === consultPath && options?.method === "POST",
+      ),
+  ).toHaveLength(1);
 });
 
 test("report history links to the saved report and its invite", async () => {
-  vi.mocked(fetch).mockImplementation(async () =>
-    Response.json({ user: { nickname: "공주" } }),
-  );
-  saveSession({
-    ...emptyReading,
-    readingId: "a".repeat(48),
-    question: "먼저 연락해도 될까?",
-    demo: false,
-    ended: true,
-    date: new Date().toISOString(),
-    notes: [],
-    transcript: [],
-    report: {
-      question: "먼저 연락해도 될까?",
-      summary: "가벼운 안부부터.",
-      queen_line: "마음은 솔직하게.",
-      readings: [],
-    },
+  const question = "먼저 연락해도 될까?";
+  const date = new Date().toISOString();
+  vi.mocked(fetch).mockImplementation(async (path) => {
+    if (path === userPath) return Response.json({ nickname: "공주" });
+    if (path === consultPath)
+      return Response.json({
+        items: [
+          {
+            id: consultationId,
+            question,
+            report_status: "COMPLETED",
+            situation_summary: "가벼운 안부부터.",
+            created_at: date,
+          },
+        ],
+        next_cursor: null,
+      });
+    if (path === `${consultPath}/${consultationId}/report`)
+      return Response.json({
+        consultation_id: consultationId,
+        question,
+        consulted_at: date,
+        cards: [
+          {
+            slot: 1,
+            picked_number: 7,
+            position: "나",
+            revealed: true,
+            card_id: 23,
+            card_code: "cups-ace",
+            name: "컵 에이스",
+            direction: "UPRIGHT",
+            keywords: ["감정"],
+          },
+        ],
+        situation_summary: "가벼운 안부부터.",
+        queen_line: "마음은 솔직하게.",
+        readings: [],
+      });
+    throw Error(`Unexpected request: ${path}`);
   });
   history.replaceState({}, "", "/reports");
   const user = userEvent.setup();
@@ -284,6 +350,9 @@ test("report history links to the saved report and its invite", async () => {
   );
   await screen.findByRole("button", { name: "친구한테도 알려주기" });
   expect(screen.getByText("마음은 솔직하게.")).toBeTruthy();
+  expect(
+    screen.getByRole("img", { name: "컵 에이스" }).getAttribute("src"),
+  ).toBe("/cards/tarot/minor-cups-1.webp");
 });
 
 test("Christmas invitation opens without a report and leads to sign-in", async () => {

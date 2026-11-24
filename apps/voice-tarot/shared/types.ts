@@ -1,5 +1,6 @@
 export interface Card {
   id: number;
+  code?: string;
   number: number;
   slot: number;
   position: string;
@@ -74,6 +75,7 @@ export interface Session extends Reading {
   endAt?: number;
   connected?: boolean;
   report?: Report;
+  reportPending?: boolean;
   ended?: boolean;
 }
 export interface ReadingResult {

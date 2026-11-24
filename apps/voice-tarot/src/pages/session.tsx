@@ -2,9 +2,8 @@ import { Cards } from "@/components/cards";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { readingOptions } from "@/api/client";
+import { consultationOptions } from "@/api/consultations";
 import type { Session } from "@/api/types";
-import { loadSession } from "@/lib/storage";
 import { Consultation } from "@/features/consultation/controller";
 import {
   selectionCount,
@@ -38,7 +37,7 @@ function Wave() {
 
 export function SessionPage() {
   const { id = "" } = useParams();
-  const reading = useQuery(readingOptions(id));
+  const reading = useQuery(consultationOptions(id));
   if (reading.isPending)
     return (
       <section className="page" role="status">
@@ -54,18 +53,7 @@ export function SessionPage() {
         <Link to="/">홈으로</Link>
       </section>
     );
-  const previous = loadSession(id);
-  const local = previous?.demo ? undefined : previous;
-  const session: Session = {
-    transcript: [],
-    notes: [],
-    date: new Date().toISOString(),
-    ...local,
-    ...reading.data!.state,
-    readingId: id,
-    demo: false,
-  };
-  return <Call key={id} initial={session} />;
+  return <Call key={id} initial={reading.data!} />;
 }
 function Call({ initial }: { initial: Session }) {
   const [controller] = useState(() => new Consultation(initial)),
@@ -182,6 +170,18 @@ function Call({ initial }: { initial: Session }) {
               : s.report?.queen_line}
           </p>
         </Panel>
+        {v.phase === "ending" && v.error && (
+          <>
+            <p role="alert">{v.error}</p>
+            <Button
+              size="wide"
+              disabled={v.busy}
+              onClick={() => void controller.saveReport()}
+            >
+              리포트 저장 다시 시도
+            </Button>
+          </>
+        )}
         <Button asChild disabled={v.phase === "ending"} size="wide">
           <Link
             aria-disabled={v.phase === "ending"}
