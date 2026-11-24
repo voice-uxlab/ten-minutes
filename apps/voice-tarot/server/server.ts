@@ -146,6 +146,7 @@ export const server = createServer(async (req, res) => {
     if (process.env.SERVE_REACT === "1" && req.method === "GET") {
       const asset =
         /^\/assets\/(?:metallic\/)?[a-zA-Z0-9_.-]+$/.test(path) ||
+        /^\/cards\/tarot\/(?:major|minor)-[a-z0-9-]+\.webp$/.test(path) ||
         path === "/fonts/PretendardVariable.woff2";
       const route =
         path === "/" ||
@@ -167,6 +168,7 @@ export const server = createServer(async (req, res) => {
                   js: "text/javascript",
                   css: "text/css",
                   png: "image/png",
+                  webp: "image/webp",
                   woff2: "font/woff2",
                   html: "text/html; charset=utf-8",
                 } as Record<string, string>

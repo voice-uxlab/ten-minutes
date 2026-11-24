@@ -1,11 +1,12 @@
 import { memo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import type { Card } from "@/api/types";
+import { cardImage } from "./card-image";
 type DisplayCard = Pick<Card, "number" | "slot" | "position"> & Partial<Card>;
-const art: Record<string, { image: string; roman: string; english: string }> = {
-  별: { image: "star", roman: "XVII", english: "THE STAR" },
-  태양: { image: "sun", roman: "XIX", english: "THE SUN" },
-  절제: { image: "temperance", roman: "XIV", english: "TEMPERANCE" },
+const titles: Record<number, { roman: string; english: string }> = {
+  14: { roman: "XIV", english: "TEMPERANCE" },
+  17: { roman: "XVII", english: "THE STAR" },
+  19: { roman: "XIX", english: "THE SUN" },
 };
 const cardBack = "/assets/metallic/metallic-card-back.png";
 const TarotCard = memo(function TarotCard({
@@ -20,7 +21,8 @@ const TarotCard = memo(function TarotCard({
   hidden: boolean;
 }) {
   const reduced = useReducedMotion();
-  const artwork = art[card.name || ""];
+  const image = cardImage(card.id);
+  const title = card.id === undefined ? undefined : titles[card.id];
   return (
     <div className={"card-wrap" + (active ? " active" : "")} hidden={hidden}>
       <motion.div
@@ -33,17 +35,13 @@ const TarotCard = memo(function TarotCard({
       >
         {open ? (
           <>
-            <span className="arcana">{artwork?.roman ?? "TAROT"}</span>
-            {artwork ? (
-              <img
-                className="symbol"
-                src={`/assets/${artwork.image}.png`}
-                alt={card.name}
-              />
+            <span className="arcana">{title?.roman ?? "TAROT"}</span>
+            {image ? (
+              <img className="symbol" src={image} alt={card.name} />
             ) : (
               <span className="symbol">✦</span>
             )}
-            <span className="english">{artwork?.english ?? card.position}</span>
+            <span className="english">{title?.english ?? card.position}</span>
             <b>{card.name}</b>
           </>
         ) : (
