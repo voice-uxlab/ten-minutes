@@ -1,0 +1,27 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>레나 목소리 테스트</title><link rel="stylesheet" href="/voice-lab.css"></head><body><main>
+<header><a href="/">← 타로로 돌아가기</a><span>QUEEN’S TAROT · VOICE LAB</span></header>
+<h1>레나의 목소리를 골라봐.</h1><p class="intro">같은 대사, 다른 목소리. 설정을 바꾸고 바로 들어봐.</p>
+<p id="connection" role="status">서버 설정을 확인하고 있어요…</p>
+<form id="lab"><div class="layout"><section class="panel"><h2>01 · 목소리와 감정</h2>
+<div class="samples" role="group" aria-label="목소리 후보">
+<button type="button" data-voice="tc_60194446adfd1fbe5e0dd975" aria-pressed="false">라미 · Lamie</button>
+<button type="button" data-voice="tc_667ce80314cb3a612d6959e8" aria-pressed="false">혜민 · Hyemin</button>
+</div><p id="voiceChoice" class="hint" aria-live="polite">후보를 선택하거나 아래에 다른 ID를 직접 입력해 주세요.</p>
+<label>타입캐스트 보이스 ID<input id="voice" required maxlength="104" placeholder="tc_…" autocomplete="off"></label><a href="https://studio.typecast.ai/developers/api/voices" target="_blank" rel="noreferrer">보이스 목록에서 ID 찾기 ↗</a>
+<label>모델<select id="model"><option value="ssfm-v30">SSFM v30</option><option value="ssfm-v31">SSFM v31</option><option value="ssfm-v21">SSFM v21</option></select></label><small>보이스 목록에서 해당 목소리의 지원 모델을 확인해 주세요.</small>
+<label>감정 모드<select id="mode"><option value="smart">자동 · 대사 문맥에 맞추기</option><option value="preset">직접 · 감정 고정하기</option></select></label>
+<p id="modeHelp" class="hint">자동 모드는 대사와 앞 문장의 문맥을 보고 감정을 정해요.</p>
+<fieldset id="emotions"><label>감정<select id="emotion"><option value="normal">일반</option><option value="happy">기쁨</option><option value="sad">슬픔</option><option value="angry">화남</option><option value="whisper">속삭임</option><option value="toneup">높은 톤</option><option value="tonedown">낮은 톤</option></select></label>
+<label>감정 강도 <output for="intensity" id="intensityValue"></output><input id="intensity" type="range" min="0" max="2" step="0.1"></label><small>0은 중립, 1은 보통, 2는 강한 표현이에요.</small></fieldset>
+</section><section class="panel"><h2>02 · 말하는 방식</h2>
+<label>말하기 속도 <output for="speed" id="speedValue"></output><input id="speed" type="range" min="0.5" max="2" step="0.05"></label>
+<label>음높이 <output for="pitch" id="pitchValue"></output><input id="pitch" type="range" min="-12" max="12" step="1"></label>
+<label class="check"><input type="checkbox" id="silenceEnabled"> 긴 침묵 줄이기</label><label>남길 침묵 <output for="silence" id="silenceValue"></output><input id="silence" type="range" min="0" max="1000" step="10"></label><small>선택한 길이보다 긴 무음을 줄여요. 끄면 원래 쉼을 유지해요.</small>
+<label class="check"><input type="checkbox" id="loudnessEnabled"> 음량 일정하게 맞추기</label><label>목표 음량 <output for="loudness" id="loudnessValue"></output><input id="loudness" type="range" min="-70" max="0" step="1"></label><small>0에 가까울수록 커요. −23부터 비교해 보세요.</small>
+<button type="button" id="reset" class="secondary">기본 설정으로</button>
+</section><section class="panel wide"><h2>03 · 같은 대사로 비교하기</h2>
+<div class="samples"><button type="button" data-sample="공주, 오늘은 무슨 일이 있었어? 서두르지 말고 네 얘기부터 해봐.">첫 인사</button><button type="button" data-sample="이 카드는 새로운 시작을 이야기해. 아직 모든 게 정해진 건 아니야. 지금 네가 원하는 방향을 생각해 봐.">카드 해석</button><button type="button" data-sample="공주, 네가 왜 그 사람 눈치를 봐. 네 마음부터 챙겨. 선택하는 건 너야.">단호한 조언</button><button type="button" data-sample="많이 속상했겠다. 괜찮은 척하느라 애썼네. 여기서는 솔직하게 말해도 돼.">공감</button></div>
+<label for="text">테스트 대사</label><textarea id="text" rows="4" maxlength="2000" required>공주, 오늘은 무슨 일이 있었어? 서두르지 말고 네 얘기부터 해봐.</textarea>
+<div class="actions"><button id="play" type="submit">▶ 이 설정으로 들어보기</button><button id="stop" type="button" class="secondary" disabled>■ 중지</button><button id="apply" type="button" class="secondary">다음 실제 통화에 적용</button></div>
+<p id="status" role="status" aria-live="polite">준비됐어요.</p><p id="applied" class="hint"></p><small>듣기를 누르면 타입캐스트 API 크레딧이 사용돼요. 설정 변경만으로는 합성하지 않아요. 적용한 설정은 이 서버의 다음 통화에 사용되며, 서버 재시작 시 초기화돼요. 테스트 중 설정을 바꾸면 다시 듣기를 눌러 주세요.</small>
+</section></div></form></main><script type="module" src="/voice-lab.js"></script></body></html>

@@ -1,19 +1,35 @@
 # Ten Minutes
 
+실시간 음성으로 고민을 나누고 타로 카드를 선택해 해석을 듣는 AI 타로 상담 서비스입니다.
+
 ## 개발 환경
 
-현재 저장소는 프로젝트 아이디어와 기술 문서를 관리하는 단계입니다. 애플리케이션 실행 환경이 구성되면 각 애플리케이션의 README에 필요한 런타임, 패키지 매니저, 설치 명령을 추가합니다.
+홍비님의 `frontend-setup-proposal`을 기준으로 구현한 React 앱과 Node.js API는 [`apps/voice-tarot`](apps/voice-tarot/README.md)에 있습니다. Node.js 24 이상과 npm을 사용합니다.
 
-- 인증 정보와 API 키는 환경 변수로 관리합니다.
-- 개인용 `.env` 파일은 커밋하지 않습니다.
-- 의존성은 프로젝트에서 지정한 패키지 매니저로 설치합니다.
+- 인증 정보와 API 키는 서버 환경 변수로 관리합니다.
+- 개인용 `.env`, 상담 로그, 녹음 파일은 커밋하지 않습니다.
+- 의존성은 앱의 `package-lock.json`을 기준으로 설치합니다.
+- 백엔드 설계와 API 명세는 [`specs/backend`](specs/backend/README.md)를 참고하세요. 설계 문서의 기능과 현재 테스트 앱의 구현 범위는 다를 수 있습니다.
 
 ## 실행 방법
 
-현재 실행 가능한 애플리케이션 명령은 정의되어 있지 않습니다. 웹 또는 백엔드 애플리케이션이 추가되면 다음 항목을 이 문서와 각 영역의 README에 기록합니다.
-
-```text
-설치: <의존성 설치 명령>
-실행: <개발 서버 실행 명령>
-검증: <lint / test / build 명령>
+```sh
+cd apps/voice-tarot
+npm ci
+npm run dev
 ```
+
+http://localhost:5173 — 프론트엔드와 로컬 API 서버가 함께 실행됩니다. API 키 없이 시범 통화를 사용할 수 있습니다. 실제 음성 상담과 OAuth 설정은 앱 README를 참고하세요.
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+기존 JavaScript PoC는 비교용 보관본이며 `npm run poc`로 실행할 수 있습니다. 현재 실행 코드는 앱의 `src/`, `server/`, `shared/`에 있습니다.
+
+## 협업
+
+브랜치와 PR 규칙은 [`docs/git-flow.md`](docs/git-flow.md)를 따릅니다. 작업 브랜치에서 PR을 만들고 `dev`로 병합합니다.
