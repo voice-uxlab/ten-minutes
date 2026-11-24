@@ -7,9 +7,6 @@ interface SpeechTurn {
   first: boolean;
   done: boolean;
   timeout?: ReturnType<typeof setTimeout>;
-  abort?: AbortController;
-  responseId?: string;
-  index?: number;
 }
 interface SpeechOptions {
   onState?: (busy: boolean) => void;
@@ -18,39 +15,12 @@ interface SpeechOptions {
   onPlaybackStart?: (text: string) => void;
   destination?: AudioNode;
   socketFactory?: (url: string) => WebSocket;
-  streamSegment?: (
-    text: string,
-    responseId: string,
-    index: number,
-    signal: AbortSignal,
-  ) => Promise<Response>;
 }
 export function displaySpeech(text: string) {
   return text
     .replace(/\[[^\]]*\]/g, "")
     .replace(/\[[^\]]*$/, "")
     .replace(/^ +/, "");
-}
-
-function wavSampleRate(header: Uint8Array) {
-  const view = new DataView(header.buffer);
-  const tag = (offset: number) =>
-    String.fromCharCode(...header.subarray(offset, offset + 4));
-  const rate = view.getUint32(24, true);
-  if (
-    tag(0) !== "RIFF" ||
-    tag(8) !== "WAVE" ||
-    tag(12) !== "fmt " ||
-    tag(36) !== "data" ||
-    view.getUint32(16, true) !== 16 ||
-    view.getUint16(20, true) !== 1 ||
-    view.getUint16(22, true) !== 1 ||
-    view.getUint16(34, true) !== 16 ||
-    rate < 8000 ||
-    rate > 96000
-  )
-    throw Error("타입캐스트 오디오 형식을 읽지 못했어요.");
-  return rate;
 }
 
 // One browser socket per call; independent contexts separate interrupted answers.
@@ -62,10 +32,6 @@ export class SpeechPlayer {
   onFirstAudio: () => void;
   onPlaybackStart: (text: string) => void;
   socketFactory: (url: string) => WebSocket;
-  private streamSegment?: SpeechOptions["streamSegment"];
-  private streaming = false;
-  private streamResponse = "";
-  private segmentIndex = 0;
   sources: Set<AudioBufferSourceNode>;
   captionTimers: Set<ReturnType<typeof setTimeout>>;
   turns: SpeechTurn[];
@@ -88,7 +54,6 @@ export class SpeechPlayer {
       onPlaybackStart = () => {},
       destination = context.destination,
       socketFactory = (url) => new WebSocket(url),
-      streamSegment,
     }: SpeechOptions = {},
   ) {
     this.context = context;
@@ -98,7 +63,6 @@ export class SpeechPlayer {
     this.onFirstAudio = onFirstAudio;
     this.onPlaybackStart = onPlaybackStart;
     this.socketFactory = socketFactory;
-    this.streamSegment = streamSegment;
     this.sources = new Set();
     this.captionTimers = new Set();
     this.turns = [];
@@ -112,10 +76,6 @@ export class SpeechPlayer {
   connect(
     url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/speech`,
   ) {
-    if (this.streamSegment) {
-      this.ready = true;
-      return Promise.resolve();
-    }
     this.socket = this.socketFactory(url);
     return new Promise<void>((resolve, reject) => {
       this.rejectConnect = reject;
@@ -166,35 +126,7 @@ export class SpeechPlayer {
   send(data: unknown) {
     if (this.ready && !this.closed) this.socket?.send(JSON.stringify(data));
   }
-  append(delta: string, flush = false, responseId?: string) {
-    if (this.streamSegment) {
-      if (!this.ready || this.closed || !responseId) return;
-      if (this.streamResponse !== responseId) {
-        this.streamResponse = responseId;
-        this.segmentIndex = 0;
-      }
-      const text = displaySpeech(delta).trim();
-      if (!text) return;
-      const characters = Array.from(text);
-      for (let offset = 0; offset < characters.length; offset += 500) {
-        const segment = characters.slice(offset, offset + 500).join("");
-        this.turns.push({
-          id: `speech-${++this.serial}`,
-          text: segment,
-          caption: segment,
-          audio: [],
-          remainder: new Uint8Array(0),
-          first: true,
-          done: false,
-          responseId,
-          index: this.segmentIndex++,
-          abort: new AbortController(),
-        });
-      }
-      this.onState(true);
-      void this.pumpStream();
-      return;
-    }
+  append(delta: string, flush = false) {
     if (this.closed || !this.ready || (!delta && !this.current)) return;
     if (!this.current) {
       this.current = {
@@ -241,66 +173,6 @@ export class SpeechPlayer {
     }
     if (flush) this.current = null;
   }
-  private async pumpStream() {
-    if (this.streaming || this.closed || !this.streamSegment) return;
-    this.streaming = true;
-    try {
-      while (this.turns.length && !this.closed) {
-        const turn = this.turns[0];
-        const signal = AbortSignal.any([
-          turn.abort!.signal,
-          AbortSignal.timeout(30000),
-        ]);
-        try {
-          const response = await this.streamSegment(
-            turn.text,
-            turn.responseId!,
-            turn.index!,
-            signal,
-          );
-          const reader = response.body?.getReader();
-          if (!reader) throw Error("합성 오디오 스트림을 받지 못했어요.");
-          const header = new Uint8Array(44);
-          let headerSize = 0;
-          try {
-            while (!signal.aborted) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              if (signal.aborted) break;
-              const size = Math.min(header.length - headerSize, value.length);
-              if (size) {
-                header.set(value.subarray(0, size), headerSize);
-                headerSize += size;
-                if (headerSize < header.length) continue;
-                this.sampleRate = wavSampleRate(header);
-              }
-              if (value.length > size) {
-                turn.audio.push(value.subarray(size));
-                this.drain();
-              }
-            }
-          } finally {
-            await reader.cancel().catch(() => {});
-          }
-          if (turn.abort!.signal.aborted) continue;
-          if (signal.aborted) throw Error("음성 응답 시간이 초과됐어요.");
-          turn.done = true;
-          this.drain();
-        } catch (error) {
-          if (!turn.abort!.signal.aborted) {
-            this.fail(
-              error instanceof Error
-                ? error.message
-                : "음성 합성에 실패했어요.",
-            );
-          }
-        }
-      }
-    } finally {
-      this.streaming = false;
-    }
-  }
-
   drain() {
     // Later contexts may synthesize early, but their audio must play in text order.
     while (this.turns.length) {
@@ -365,7 +237,6 @@ export class SpeechPlayer {
     this.captionTimers.clear();
     for (const turn of this.turns) {
       clearTimeout(turn.timeout);
-      turn.abort?.abort();
       this.send({ type: "cancel", id: turn.id });
     }
     this.turns = [];

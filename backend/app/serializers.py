@@ -17,7 +17,6 @@ def user_response(user: User) -> dict:
         "nickname": user.nickname,
         "provider": provider,
         "onboarding_required": not bool(user.consent_version) or nickname_required,
-        "consent_version": user.consent_version,
         "created_at": ensure_utc(user.created_at),
     }
 
@@ -75,7 +74,6 @@ def consultation_response(consultation: Consultation) -> dict:
         "report_status": consultation.report.status if consultation.report else None,
         "created_at": ensure_utc(consultation.created_at),
         "ended_at": ensure_utc(consultation.ended_at),
-        "call_ends_at": consultation.call_ends_at,
     }
 
 

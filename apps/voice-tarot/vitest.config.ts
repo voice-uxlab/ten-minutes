@@ -9,6 +9,6 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
-    env: { VITE_AUTH_API_ORIGIN: "", VITE_AUTH_CONSENT_VERSION: "2026-11" },
+    env: { VITE_AUTH_API_ORIGIN: "" },
   },
 });

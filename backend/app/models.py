@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
@@ -122,10 +122,6 @@ class Consultation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     end_reason: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-
-    @property
-    def call_ends_at(self) -> datetime:
-        return ensure_utc(self.created_at) + timedelta(minutes=10)
 
     cards: Mapped[list["ConsultationCard"]] = relationship(
         back_populates="consultation", cascade="all, delete-orphan", order_by="ConsultationCard.slot"

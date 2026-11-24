@@ -8,15 +8,11 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: {
-      "/api/v1": { target: "http://127.0.0.1:8000" },
-      "/auth": { target: "http://127.0.0.1:8000" },
-      ...Object.fromEntries(
-        ["/reading", "/session$", "/speech", "/research"].map((path) => [
-          path === "/session$" ? "^/session$" : path,
-          { target: "http://127.0.0.1:3011", ws: path === "/speech" },
-        ]),
-      ),
-    },
+    proxy: Object.fromEntries(
+      ["/reading", "/session$", "/auth", "/speech", "/research"].map((path) => [
+        path === "/session$" ? "^/session$" : path,
+        { target: "http://127.0.0.1:3011", ws: path === "/speech" },
+      ]),
+    ),
   },
 });

@@ -1,5 +1,4 @@
 import hashlib
-import json
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,7 +61,6 @@ from .serializers import (
 router = APIRouter(prefix="/api/v1", responses=AUTHENTICATED_RESPONSES)
 public_router = APIRouter(prefix="/api/v1", tags=["shares"], responses=PUBLIC_RESPONSES)
 PROMPT_PATH = Path(__file__).parent / "prompts" / "tarot_reader.md"
-REALTIME_TOOLS = json.loads(PROMPT_PATH.with_name("realtime_tools.json").read_text(encoding="utf-8"))
 
 CONSULTATION_NOT_FOUND_RESPONSE = error_response(
     404,
@@ -77,11 +75,12 @@ def token_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def owned_consultation(db: Session, consultation_id: UUID, user: User, *, lock: bool = False) -> Consultation:
-    query = select(Consultation).where(
-        Consultation.id == str(consultation_id), Consultation.user_id == user.id
+def owned_consultation(db: Session, consultation_id: UUID, user: User) -> Consultation:
+    consultation = db.scalar(
+        select(Consultation).where(
+            Consultation.id == str(consultation_id), Consultation.user_id == user.id
+        )
     )
-    consultation = db.scalar(query.with_for_update() if lock else query)
     if not consultation:
         raise APIError(404, "CONSULTATION_NOT_FOUND", "The consultation was not found.")
     return consultation
@@ -283,7 +282,7 @@ def select_cards(
     user: User = Depends(current_user),
 ):
     del idempotency_key
-    consultation = owned_consultation(db, consultation_id, user, lock=True)
+    consultation = owned_consultation(db, consultation_id, user)
     positions = SPREAD_POSITIONS[body.spread_type]
     if len(body.picks) != consultation.expected_card_count:
         raise APIError(422, "INVALID_CARD_COUNT", "The selected card count is invalid.")
@@ -303,7 +302,8 @@ def select_cards(
             "spread_type": consultation.spread_type,
             "cards": [card_response(card) for card in consultation.cards],
         }
-    require_active_consultation(consultation)
+    if consultation.status in {"ENDED", "FAILED"}:
+        raise APIError(409, "CONSULTATION_STATE_CONFLICT", "Cards cannot be selected for an ended consultation.")
     consultation.question = body.question
     consultation.spread_type = body.spread_type.value
     consultation.status = "ACTIVE"
@@ -362,7 +362,7 @@ def reveal_card(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    consultation = owned_consultation(db, consultation_id, user, lock=True)
+    consultation = owned_consultation(db, consultation_id, user)
     if not consultation.cards:
         raise APIError(409, "CARD_SELECTION_REQUIRED", "Select the cards before revealing them.")
     if slot < 1 or slot > consultation.expected_card_count:
@@ -375,7 +375,6 @@ def reveal_card(
         if previous.revealed_at is None:
             raise APIError(409, "PREVIOUS_CARD_NOT_REVEALED", "Reveal the previous card first.")
     if card.revealed_at is None:
-        require_active_consultation(consultation)
         card.revealed_at = datetime.now(timezone.utc)
         db.commit()
     return {"card": card_response(card)}
@@ -395,7 +394,7 @@ def end_consultation(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    consultation = owned_consultation(db, consultation_id, user, lock=True)
+    consultation = owned_consultation(db, consultation_id, user)
     if consultation.status != "ENDED":
         consultation.status = "ENDED"
         consultation.end_reason = body.reason
@@ -410,7 +409,7 @@ def end_consultation(
     status_code=201,
     tags=["reports"],
     summary="Save report",
-    description="Stores the situation summary, per-card readings, and closing message after the call ends or every card is revealed. Retrying the same request returns the existing result with status 200.",
+    description="Stores the situation summary, per-card readings, and closing message after every card is revealed. Retrying the same request returns the existing result with status 200.",
     responses={
         404: CONSULTATION_NOT_FOUND_RESPONSE,
         409: error_response(
@@ -436,10 +435,10 @@ def save_report(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    consultation = owned_consultation(db, consultation_id, user, lock=True)
-    expected_slots = [card.slot for card in consultation.cards if card.revealed_at is not None]
-    if consultation.status != "ENDED" and len(expected_slots) != consultation.expected_card_count:
+    consultation = owned_consultation(db, consultation_id, user)
+    if not consultation.cards or any(card.revealed_at is None for card in consultation.cards):
         raise APIError(409, "CARDS_NOT_FULLY_REVEALED", "Reveal every card in order before saving the report.")
+    expected_slots = list(range(1, consultation.expected_card_count + 1))
     if sorted(reading.slot for reading in body.readings) != expected_slots:
         raise APIError(422, "INVALID_REPORT_READINGS", "Report readings must match every revealed card.")
     normalized_readings = [reading.model_dump() for reading in sorted(body.readings, key=lambda item: item.slot)]
@@ -621,11 +620,11 @@ def save_event(
     return {"event_id": event.id, "stored_at": ensure_utc(event.stored_at)}
 
 
-def require_active_consultation(consultation: Consultation):
+def active_voice_consultation(db: Session, consultation_id: UUID, user: User) -> Consultation:
+    consultation = owned_consultation(db, consultation_id, user)
     if consultation.status in {"ENDED", "ENDING", "FAILED"}:
-        raise APIError(409, "CONSULTATION_STATE_CONFLICT", "The consultation has ended.")
-    if consultation.call_ends_at <= datetime.now(timezone.utc):
-        raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
+        raise APIError(409, "CONSULTATION_STATE_CONFLICT", "Audio cannot be generated for an ended consultation.")
+    return consultation
 
 
 @router.post(
@@ -657,20 +656,16 @@ async def realtime_credentials(
     user: User = Depends(current_user),
     settings: Settings = Depends(get_settings),
 ):
-    consultation = owned_consultation(db, consultation_id, user)
-    require_active_consultation(consultation)
+    del body
+    consultation = active_voice_consultation(db, consultation_id, user)
     if not settings.openai_api_key:
         raise APIError(503, "OPENAI_NOT_CONFIGURED", "OpenAI Realtime is not configured.")
-    if not settings.typecast_api_key or not settings.typecast_voice_id:
-        raise APIError(503, "TYPECAST_NOT_CONFIGURED", "Typecast speech synthesis is not configured.")
-    db.rollback()
     instructions = PROMPT_PATH.read_text(encoding="utf-8")
     payload = {
         "session": {
             "type": "realtime",
             "model": settings.openai_realtime_model,
             "instructions": instructions,
-            "tools": REALTIME_TOOLS,
             "output_modalities": ["text"],
             "audio": {
                 "input": {
@@ -689,23 +684,14 @@ async def realtime_credentials(
             )
     except httpx.TimeoutException:
         raise APIError(504, "REALTIME_CREDENTIAL_TIMEOUT", "Preparing the Realtime connection timed out.")
-    except httpx.RequestError:
-        raise APIError(502, "REALTIME_CREDENTIAL_FAILED", "Failed to prepare the Realtime connection.")
     if not upstream.is_success:
         raise APIError(502, "REALTIME_CREDENTIAL_FAILED", "Failed to prepare the Realtime connection.")
-    try:
-        data = upstream.json()
-        credential = data.get("client_secret") or {}
-        secret = data.get("value") or credential.get("value")
-        expires_at = data.get("expires_at") or credential.get("expires_at")
-    except (ValueError, AttributeError):
-        raise APIError(502, "REALTIME_INVALID_RESPONSE", "OpenAI Realtime returned an invalid response.")
+    data = upstream.json()
+    secret = data.get("value") or data.get("client_secret", {}).get("value")
+    expires_at = data.get("expires_at") or data.get("client_secret", {}).get("expires_at")
     if not secret or not expires_at:
         raise APIError(502, "REALTIME_INVALID_RESPONSE", "OpenAI Realtime returned an invalid response.")
-    consultation = owned_consultation(db, consultation_id, user, lock=True)
-    require_active_consultation(consultation)
-    if consultation.status == "CREATED":
-        consultation.status = "CONNECTING"
+    consultation.status = "CONNECTING"
     db.commit()
     return {"client_secret": secret, "expires_at": expires_at, "realtime_model": settings.openai_realtime_model}
 
@@ -718,7 +704,7 @@ async def realtime_credentials(
     responses={
         200: {
             "description": "Audio byte stream using the Content-Type returned by Typecast",
-            "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
+            "content": {"audio/mpeg": {"schema": {"type": "string", "format": "binary"}}},
         },
         404: CONSULTATION_NOT_FOUND_RESPONSE,
         409: error_response(
@@ -741,9 +727,9 @@ async def tts_stream(
     user: User = Depends(current_user),
     settings: Settings = Depends(get_settings),
 ):
-    consultation = owned_consultation(db, consultation_id, user)
-    require_active_consultation(consultation)
-    db.close()
+    _request_order = (body.response_id, body.segment_index)
+    del _request_order
+    active_voice_consultation(db, consultation_id, user)
     if not settings.typecast_api_key or not settings.typecast_voice_id:
         raise APIError(503, "TYPECAST_NOT_CONFIGURED", "Typecast speech synthesis is not configured.")
     client = httpx.AsyncClient(timeout=30)
@@ -756,12 +742,6 @@ async def tts_stream(
             "model": settings.typecast_model,
             "language": "kor",
             "text": body.text,
-            "prompt": (
-                {"emotion_preset": "normal", "emotion_intensity": 1}
-                if settings.typecast_model == "ssfm-v21"
-                else {"emotion_type": "smart"}
-            ),
-            "output": {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0},
         },
     )
     try:
@@ -769,9 +749,6 @@ async def tts_stream(
     except httpx.TimeoutException:
         await client.aclose()
         raise APIError(504, "TTS_TIMEOUT", "Speech synthesis timed out.")
-    except httpx.RequestError:
-        await client.aclose()
-        raise APIError(502, "TTS_FAILED", "Speech synthesis failed.")
     if not upstream.is_success:
         await upstream.aclose()
         await client.aclose()

@@ -5,7 +5,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createConsultation, reportsKey } from "@/api/consultations";
+import { readingRequest } from "@/api/client";
 import {
   authOptions,
   authorizeUrl,
@@ -13,6 +13,7 @@ import {
   logout,
   saveMemberProfile,
 } from "@/api/auth";
+import { emptyReading, type Session } from "@/api/types";
 import { saveSession } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -314,16 +315,26 @@ export function Home() {
     mutationFn: logout,
     onSuccess: () => {
       queryClient.setQueryData(authOptions.queryKey, null);
-      queryClient.removeQueries({ queryKey: reportsKey });
-      queryClient.removeQueries({ queryKey: ["report"] });
-      queryClient.removeQueries({ queryKey: ["consultation"] });
       navigate("/login", { replace: true });
     },
   });
   const starting = useRef(false);
   const create = useMutation({
     mutationFn: async () => {
-      const session = await createConsultation();
+      const data = await readingRequest({
+        action: "create",
+        masterId: "adaptive",
+      });
+      const session: Session = {
+        ...emptyReading,
+        ...data.state,
+        readingId: data.id,
+        demo: false,
+        voiceEngine: "realtime",
+        transcript: [],
+        notes: [],
+        date: new Date().toISOString(),
+      };
       saveSession(session, true);
       return session;
     },
@@ -430,8 +441,8 @@ export function Home() {
           </p>
           <h2>상담 기록은 어디에 남나요?</h2>
           <p>
-            상담 요약, 질문과 공개한 카드는 내 리포트에서 확인할 수 있도록
-            서비스에 보관해요.
+            상담 요약은 이 브라우저에 저장해요. 질문과 카드는 상담을 이어볼 수
+            있도록 앱 서버에 보관해요.
           </p>
         </Panel>
         <p className="hint">녹음 저장 여부는 별도로 선택할 수 있어요.</p>

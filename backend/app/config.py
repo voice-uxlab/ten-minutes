@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     openai_realtime_model: str = "gpt-realtime"
     typecast_api_key: Optional[str] = None
     typecast_voice_id: Optional[str] = None
-    typecast_model: str = "ssfm-v30"
+    typecast_model: str = "ssfm-v21"
 
     default_card_count: int = Field(default=3, ge=1, le=10)
     max_question_length: int = Field(default=300, ge=1, le=1000)
