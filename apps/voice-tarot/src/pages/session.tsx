@@ -1,6 +1,6 @@
 import { Cards } from "@/components/cards";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { readingOptions } from "@/api/client";
 import type { Session } from "@/api/types";
@@ -12,7 +12,30 @@ import {
 } from "@/features/consultation/domain";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Reader, Panel, Notes } from "@/components/tarot";
+import { BrandHeader, Reader, Panel, Notes } from "@/components/tarot";
+const topicSets = [
+  [
+    "그 사람도 나를 좋아할까?",
+    "나는 언제쯤 결혼할까?",
+    "지금 내 선택, 괜찮을까?",
+  ],
+  [
+    "먼저 연락해도 될까?",
+    "지금 일을 계속해도 될까?",
+    "새로운 인연을 만날 수 있을까?",
+  ],
+];
+
+function Wave() {
+  return (
+    <div className="wave" aria-hidden="true">
+      {Array.from({ length: 9 }, (_, i) => (
+        <i key={i} />
+      ))}
+    </div>
+  );
+}
+
 export function SessionPage() {
   const { id = "" } = useParams();
   const reading = useQuery(readingOptions(id));
@@ -48,6 +71,8 @@ function Call({ initial }: { initial: Session }) {
     v = useSyncExternalStore(controller.subscribe, controller.getSnapshot),
     s = v.session,
     location = useLocation(),
+    navigate = useNavigate(),
+    [topics, setTopics] = useState(0),
     [consent, setConsent] = useState(!!location.state?.consent),
     [edit, setEdit] = useState(false),
     [pace, setPace] = useState(v.speakingPace),
@@ -75,15 +100,47 @@ function Call({ initial }: { initial: Session }) {
   }, [controller, location.state]);
   if (v.phase === "idle" || v.phase === "error")
     return (
-      <section className="page">
-        <Reader />
+      <section
+        className="page metallic-page recovery-page"
+        data-phase={v.startIssue === "microphone" ? "permission" : v.phase}
+      >
+        <BrandHeader>
+          <span className="timer glass">
+            ●{" "}
+            {v.phase === "error"
+              ? v.startIssue === "microphone"
+                ? "준비"
+                : "연결 오류"
+              : "준비"}
+          </span>
+        </BrandHeader>
+        <Reader
+          status={
+            v.startIssue === "microphone"
+              ? "마이크 설정을 확인해줘"
+              : "연결 상태를 확인해줘"
+          }
+        />
         <h1>
-          {v.phase === "error"
-            ? "다시 이어가면 돼, 공주야."
-            : "이야기를 이어가볼까?"}
+          {v.startIssue === "microphone"
+            ? "공주 목소리를\n들을 수 있게 해줘."
+            : v.phase === "error"
+              ? "연결이 잠깐\n끊겼어, 공주야."
+              : "이야기를 이어가볼까?"}
         </h1>
-        <p role="alert">{v.error}</p>
-        <Cards cards={s.cards} revealed={s.revealed} />
+        {v.phase === "error" && (
+          <Panel title="NOTICE">
+            <p role="alert">
+              {v.startIssue === "microphone"
+                ? "브라우저의 사이트 설정에서 마이크 접근을 허용한 뒤 다시 시도해줘."
+                : v.error}
+            </p>
+            {v.startIssue !== "microphone" && (
+              <p>공주의 잘못이 아니야. 언니는 여기 있을게.</p>
+            )}
+          </Panel>
+        )}
+        {s.cards.length > 0 && <Cards cards={s.cards} revealed={s.revealed} />}
         {!s.demo ? (
           <label className="consent">
             <input
@@ -101,28 +158,34 @@ function Call({ initial }: { initial: Session }) {
           disabled={!s.demo && !consent}
           onClick={() => void controller.start()}
         >
-          {v.phase === "error" ? "다시 연결하기" : "상담 연결하기"}
+          {v.startIssue === "microphone"
+            ? "마이크 다시 확인하기"
+            : v.phase === "error"
+              ? "다시 연결하기"
+              : "상담 연결하기"}
         </Button>
-        <Link to="/">홈으로</Link>
+        <Button asChild size="wide">
+          <Link to="/">홈으로</Link>
+        </Button>
       </section>
     );
   if (["ending", "ended"].includes(v.phase))
     return (
-      <section className="page">
-        <header>
-          <strong>VOICE TAROT</strong>
-          <span>● 종료</span>
-        </header>
-        <Reader status="언제든 네 편이야." />
-        <h1>오늘도 괜찮아, 공주야.</h1>
+      <section className="page metallic-page ended-page" data-phase={v.phase}>
+        <BrandHeader>
+          <span className="timer glass">● 종료</span>
+        </BrandHeader>
+        <Reader status="다음에 또 이야기하자" />
+        <h1>이야기 나눠줘서 고마워.</h1>
+        <p className="hint">통화가 종료되었어요.</p>
         <Panel title="MESSAGE">
+          <h2>언제든 다시 이야기하자.</h2>
           <p>
             {v.phase === "ending"
               ? "오늘의 이야기를 정리하고 있어."
               : s.report?.queen_line}
           </p>
         </Panel>
-        <Notes notes={s.notes} open={s.demo} />
         <Button asChild disabled={v.phase === "ending"} size="wide">
           <Link
             aria-disabled={v.phase === "ending"}
@@ -149,7 +212,10 @@ function Call({ initial }: { initial: Session }) {
             내 목소리 녹음 저장
           </a>
         ) : null}
-        <Link to="/">처음으로 돌아가기</Link>
+        <Button asChild size="wide">
+          <Link to="/">타로 다시 보기</Link>
+        </Button>
+        <Notes notes={s.notes} open={s.demo} />
       </section>
     );
   const selecting = ["picking", "confirm"].includes(v.phase),
@@ -166,32 +232,44 @@ function Call({ initial }: { initial: Session }) {
             })),
         ]
       : s.cards;
+  const activeCard = s.cards.find((card) => v.active.includes(card.slot));
+  const focused =
+    activeCard && ["reveal", "reading"].includes(v.phase)
+      ? activeCard
+      : undefined;
+  const summary = v.phase === "reading" && s.summaryVisited && !focused;
+  const retry = selecting && v.retryNumbers;
+  const phase = retry ? "retry-numbers" : summary ? "summary" : v.phase;
+  const timer =
+    v.phase === "connecting"
+      ? "연결 중"
+      : s.demo
+        ? "시범"
+        : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`;
+  const ordinal =
+    focused && ["첫 번째", "두 번째", "세 번째"][focused.slot - 1];
+  const heading = retry
+    ? "앗, 잘 못 들었어.\n번호를 다시 알려줄래?"
+    : summary
+      ? "세 장의 카드를\n함께 살펴볼게."
+      : v.phase === "question"
+        ? "이 질문으로\n살펴볼까?"
+        : v.phase === "picking" && !s.picks.length && count === 3
+          ? "마음이 가는\n번호 세 개를 골라줘."
+          : ordinal && v.phase === "reveal"
+            ? `${ordinal} 카드는,\n${focused.name}이야.`
+            : ordinal && v.phase === "reading"
+              ? `${ordinal} 카드,\n언니가 이야기해줄게.`
+              : v.heading;
   return (
-    <section className="page call-page" data-phase={v.phase}>
-      <header>
-        <strong>VOICE TAROT</strong>
+    <section className="page metallic-page call-page" data-phase={phase}>
+      <BrandHeader>
         <span
-          className={
-            "timer glass" +
-            (!s.demo && v.phase !== "connecting" && v.remaining <= 60
-              ? " warning"
-              : "")
-          }
+          className={`timer glass${!s.demo && v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
         >
-          {s.demo
-            ? "시범"
-            : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`}
+          ● {timer}
         </span>
-      </header>
-      <span className="mode">
-        {s.demo
-          ? "시범 통화"
-          : s.voiceEngine === "live-noeul"
-            ? "레나 · 노을 목소리"
-            : s.voiceEngine === "live-typecast"
-              ? "레나 · Live + Typecast"
-              : "레나 · Realtime + Typecast"}
-      </span>
+      </BrandHeader>
       {import.meta.env.DEV && s.voiceEngine === "live-noeul" && !s.demo ? (
         <details className="panel" data-testid="developer-voice-controls">
           <summary>개발자 · 노을 말속도</summary>
@@ -226,150 +304,220 @@ function Call({ initial }: { initial: Session }) {
           최근 자막 구간 → 첫 음성 재생: {v.transcriptToAudioMs}ms (최근 구간)
         </p>
       ) : null}
-      <Reader status={v.status} />
-      <h1>{s.demo ? v.heading : "레나와 이야기 중"}</h1>
-      <p className="hint">
-        {s.demo
-          ? v.hint
-          : "편하게 말해줘. 질문 확인도 카드 번호도 말로 하면 돼."}
-      </p>
-      <Panel title="MESSAGE">
-        {!s.demo && s.voiceEngine !== "live-noeul" && !v.audioPlaying ? (
-          <div className="voice-waiting" role="status">
-            <span className="voice-waiting-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-            <span>
-              {v.status === "레나가 생각하는 중"
-                ? "레나가 생각 중"
-                : "네 이야기 듣고 있어"}
-            </span>
+      {v.phase === "reveal" && focused ? (
+        <p className="eyebrow">
+          PICKED BY PRINCESS / {focused.slot} OF {s.cards.length}
+        </p>
+      ) : (
+        !summary && (
+          <Reader
+            active={[
+              "listening",
+              "question",
+              "picking",
+              "confirm",
+              "reading",
+            ].includes(v.phase)}
+            status={retry ? "번호를 다시 말해줘" : v.status}
+          />
+        )
+      )}
+      <h1>{heading}</h1>
+      {["listening", "question"].includes(v.phase) && (
+        <p className="question-progress">
+          <span data-current={v.phase === "listening"}>1 고민 말하기</span>
+          <span aria-hidden="true">›</span>
+          <span data-current={v.phase === "question"}>2 질문 확인</span>
+        </p>
+      )}
+      {retry ? (
+        <p className="hint">번호 다시 듣기 · 천천히 말해줘</p>
+      ) : focused ? (
+        <p className="hint">
+          {focused.slot} / {s.cards.length} · {focused.position}
+          {v.phase === "reading" ? ` · ${focused.name}` : ""}
+        </p>
+      ) : (
+        v.phase !== "question" &&
+        v.phase !== "listening" && (
+          <p className="hint">
+            {v.phase === "connecting"
+              ? "마이크와 오디오를 연결하고 있어요"
+              : v.hint}
+          </p>
+        )
+      )}
+      {v.phase === "listening" && (
+        <Panel title="MESSAGE" className="listening-message">
+          <p aria-live="polite">
+            {v.caption || "편하게 말해줘. 아래 질문을 골라도 좋아!"}
+          </p>
+          <div className="topic-list">
+            {topicSets[topics].map((topic) => (
+              <Button
+                key={topic}
+                disabled={v.busy}
+                onClick={() =>
+                  void controller.editQuestion(topic, recommendSpread(topic))
+                }
+              >
+                {topic}
+                <span aria-hidden="true">›</span>
+              </Button>
+            ))}
+            <button
+              className="text-button"
+              onClick={() => setTopics((topics + 1) % topicSets.length)}
+            >
+              ⟳ 다른 질문 보기
+            </button>
           </div>
-        ) : (
-          <p aria-live="polite">{v.caption}</p>
-        )}
-      </Panel>
-      <details className="panel voice-secondary" open={s.demo || undefined}>
-        <summary>카드 보기 · 화면으로 도와주기 (선택)</summary>
-        <p className="hint">여기를 누르지 않아도 말로 계속할 수 있어.</p>
-        {v.phase === "question" ? (
-          <>
-            <Panel title="YOUR QUESTION">
-              <b>공주의 고민</b>
-              <p>{s.question}</p>
-              {edit ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void controller
-                      .editQuestion(question.trim(), recommendSpread(question))
-                      .then(() => setEdit(false));
-                  }}
-                >
-                  <label htmlFor="question">상담할 질문</label>
-                  <Input
-                    id="question"
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    maxLength={300}
-                    required
-                  />
-                  <Button disabled={v.busy}>수정한 질문으로 확인</Button>
-                </form>
-              ) : null}
-            </Panel>
-            <Button
-              size="wide"
-              disabled={v.busy}
-              onClick={() => void controller.interact("confirm_question")}
-            >
-              응, 이 질문으로 볼래
-            </Button>
-            <Button
-              size="wide"
-              onClick={() => {
-                setQuestion(s.question);
-                setEdit(true);
-              }}
-            >
-              조금 다르게 말할게
-            </Button>
-          </>
-        ) : null}
-        {selecting ? (
-          <>
-            <p className="hint">
-              1~78 사이 번호를 말해줘. {s.picks.length} / {count}
+        </Panel>
+      )}
+      {v.phase === "connecting" && (
+        <>
+          <Panel title="CONNECTING" className="connecting-message">
+            <p>
+              곧 언니 목소리가 들릴 거야.
+              <br />
+              편하게 이야기할 준비만 해줘.
             </p>
-            <div className="number-chips" aria-live="polite">
-              {s.picks.map((n) => (
-                <span className="number-chip" key={n}>
-                  {n}번
-                </span>
-              ))}
-            </div>
-            <details>
-              <summary>직접 번호 고르기</summary>
-              <div id="grid">
-                {Array.from({ length: 78 }, (_, i) => i + 1).map((n) => (
-                  <button
-                    key={n}
-                    aria-label={`${n}번 카드`}
-                    aria-pressed={s.picks.includes(n)}
-                    className={s.picks.includes(n) ? "selected" : ""}
-                    disabled={v.busy || s.cards.some((c) => c.number === n)}
-                    onClick={() => controller.pick(n)}
+          </Panel>
+          <Wave />
+          <Button size="wide" onClick={() => navigate("/")}>
+            연결 취소
+          </Button>
+        </>
+      )}
+      {v.phase !== "connecting" && v.phase !== "listening" && (
+        <div className="phase-content">
+          {v.phase === "question" ? (
+            <>
+              <Panel title="YOUR QUESTION">
+                <b>공주의 고민</b>
+                <p>{s.question}</p>
+                {edit ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void controller
+                        .editQuestion(
+                          question.trim(),
+                          recommendSpread(question),
+                        )
+                        .then(() => setEdit(false));
+                    }}
                   >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </details>
-          </>
-        ) : null}
-        <Cards cards={cards} revealed={s.revealed} active={v.active} />
-        {v.phase === "confirm" ? (
-          <div className="action-stack">
-            <Button
-              size="wide"
-              disabled={v.busy}
-              onClick={() => void controller.interact("confirm_cards")}
-            >
-              응, 이 {count}장을 열어줘
-            </Button>
-            <Button
-              size="wide"
-              disabled={v.busy}
-              onClick={() =>
-                void controller.interact("select_numbers", {
-                  picks: [],
-                  replace: true,
-                })
-              }
-            >
-              번호 다시 말하기
-            </Button>
-          </div>
-        ) : null}
-
-      </details>
+                    <label htmlFor="question">상담할 질문</label>
+                    <Input
+                      id="question"
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      maxLength={300}
+                      required
+                    />
+                    <Button disabled={v.busy}>수정한 질문으로 확인</Button>
+                  </form>
+                ) : null}
+              </Panel>
+              <Button
+                size="wide"
+                disabled={v.busy}
+                onClick={() => void controller.interact("confirm_question")}
+              >
+                응, 이 질문으로 볼래
+              </Button>
+              <Button
+                size="wide"
+                onClick={() => {
+                  setQuestion(s.question);
+                  setEdit(true);
+                }}
+              >
+                조금 다르게 말할게
+              </Button>
+            </>
+          ) : null}
+          {v.phase !== "question" && (
+            <Cards
+              cards={cards}
+              revealed={s.revealed}
+              active={v.active}
+              pending={selecting ? count - s.picks.length : 0}
+              focus={focused?.slot}
+            />
+          )}
+          {selecting ? (
+            <>
+              <Panel title={retry ? "TRY AGAIN" : "MESSAGE"}>
+                <p>
+                  {retry
+                    ? "번호를 천천히 다시 말해줘. 이미 확인된 번호는 그대로 둘게."
+                    : "1~78 중 서로 다른 번호를 말해줘. 다 뽑으면 한 장씩 해석해줄게."}
+                </p>
+              </Panel>
+              <details>
+                <summary>직접 번호 고르기</summary>
+                <div id="grid">
+                  {Array.from({ length: 78 }, (_, i) => i + 1).map((n) => (
+                    <button
+                      key={n}
+                      aria-label={`${n}번 카드`}
+                      aria-pressed={s.picks.includes(n)}
+                      className={s.picks.includes(n) ? "selected" : ""}
+                      disabled={v.busy || s.cards.some((c) => c.number === n)}
+                      onClick={() => controller.pick(n)}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            </>
+          ) : null}
+          {!selecting && v.phase !== "question" && (
+            <>
+              <Panel title="MESSAGE" className="reading-message">
+                <p aria-live="polite">
+                  {v.caption ||
+                    (v.phase === "reveal" && focused
+                      ? focused.reversed
+                        ? focused.reverse
+                        : focused.upright
+                      : "네 이야기를 듣고 있어.")}
+                </p>
+              </Panel>
+            </>
+          )}
+          {v.phase === "confirm" ? (
+            <div className="action-stack">
+              <Button
+                size="wide"
+                disabled={v.busy}
+                onClick={() => void controller.interact("confirm_cards")}
+              >
+                응, 이 {count}장을 열어줘
+              </Button>
+              <Button
+                size="wide"
+                disabled={v.busy}
+                onClick={() =>
+                  void controller.interact("select_numbers", {
+                    picks: [],
+                    replace: true,
+                  })
+                }
+              >
+                번호 다시 말하기
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      )}
       {v.error ? (
         <p role="alert" className="error-message">
           {v.error}
         </p>
-      ) : null}
-      {s.demo && ["listening", "reveal", "reading"].includes(v.phase) ? (
-        <Button
-          size="wide"
-          disabled={v.busy}
-          onClick={() => void controller.nextDemo()}
-        >
-          {v.phase === "listening"
-            ? "예시 고민으로 계속하기 →"
-            : "다음 이야기 듣기 →"}
-        </Button>
       ) : null}
       {!s.demo && v.remaining <= 60 && profile().tickets > 0 ? (
         <Button
@@ -379,37 +527,79 @@ function Call({ initial }: { initial: Session }) {
           이용권으로 10분 연장
         </Button>
       ) : null}
-      {["connecting", "listening"].includes(v.phase) ? (
-        <div className="wave" aria-label="음성 상담 중">
-          {Array.from({ length: 9 }, (_, i) => (
-            <i key={i} />
-          ))}
+      {v.phase === "listening" && (
+        <div className="listening-wave">
+          <Wave />
+          <p className="hint">말하면 자동으로 들어요</p>
         </div>
-      ) : null}
-      <div className="controls">
-        <button
-          aria-label="마이크 음소거"
-          aria-pressed={v.muted}
-          disabled={s.demo}
-          onClick={() => controller.mute()}
-        >
-          <span className="control-icon">♩</span>
-          <span className="control-label">
-            {v.muted ? "음소거 중" : "마이크 켜짐"}
-          </span>
-        </button>
-        <button id="hangup" onClick={() => void controller.end()}>
-          <span className="control-icon">☎</span>
-          <span className="control-label">통화 종료</span>
-        </button>
+      )}
+      {v.phase !== "connecting" && (
+        <div className="controls">
+          <button
+            aria-label="마이크 음소거"
+            aria-pressed={v.muted}
+            disabled={s.demo}
+            onClick={() => controller.mute()}
+          >
+            <span className="control-icon">
+              <img
+                src={
+                  v.muted || s.demo
+                    ? "/assets/metallic/mic-off.png"
+                    : "/assets/metallic/mic.png"
+                }
+                width={v.muted || s.demo ? 43 : 24}
+                height={v.muted || s.demo ? 43 : 24}
+                alt=""
+              />
+            </span>
+            <span className="control-label">
+              {s.demo || v.muted ? "마이크 꺼짐" : "마이크 켜짐"}
+            </span>
+          </button>
+          <button id="hangup" onClick={() => void controller.end()}>
+            <span className="control-icon">
+              <img
+                src="/assets/metallic/end-call.png"
+                width={29.33}
+                height={29.33}
+                alt=""
+              />
+            </span>
+            <span className="control-label">통화 종료</span>
+          </button>
+          <Button
+            id="bgm"
+            variant="ghost"
+            onClick={() => controller.setMusic(!v.bgm)}
+          >
+            배경음 {v.bgm ? "켜짐" : "꺼짐"}
+          </Button>
+        </div>
+      )}
+      {s.demo &&
+      !summary &&
+      ["listening", "reveal", "reading"].includes(v.phase) ? (
         <Button
-          id="bgm"
-          variant="ghost"
-          onClick={() => controller.setMusic(!v.bgm)}
+          size="wide"
+          className="demo-action"
+          disabled={v.busy}
+          onClick={() => void controller.nextDemo()}
         >
-          배경음 {v.bgm ? "켜짐" : "꺼짐"}
+          {v.phase === "listening"
+            ? "예시 고민으로 계속하기 →"
+            : "다음 이야기 듣기 →"}
         </Button>
-      </div>
+      ) : null}
+      {summary && (
+        <Button
+          size="wide"
+          disabled={v.busy}
+          onClick={() => void controller.end()}
+        >
+          상담 마치고 리포트 보기
+        </Button>
+      )}
     </section>
   );
 }

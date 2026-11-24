@@ -11,6 +11,12 @@ import { PaymentResult } from "@/pages/payment-result";
 const ReportPage = lazy(() =>
   import("@/pages/report").then((m) => ({ default: m.ReportPage })),
 );
+const ReportsPage = lazy(() =>
+  import("@/pages/report").then((m) => ({ default: m.ReportsPage })),
+);
+const ChristmasInvite = lazy(() =>
+  import("@/pages/report").then((m) => ({ default: m.ChristmasInvite })),
+);
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -27,13 +33,17 @@ export function App() {
               <Route path="/" element={<Home key="realtime" />} />
               <Route
                 path="/live-lab"
-                element={<Home key="live-typecast" voiceEngine="live-typecast" />}
+                element={
+                  <Home key="live-typecast" voiceEngine="live-typecast" />
+                }
               />
               <Route path="/screens" element={<Screens />} />
               <Route path="/login" element={<Home key="realtime" />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/sessions/:id" element={<SessionPage />} />
               <Route path="/sessions/:id/report" element={<ReportPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/invite/christmas" element={<ChristmasInvite />} />
               <Route path="/tickets" element={<Tickets />} />
               <Route path="/payments/result" element={<PaymentResult />} />
               <Route

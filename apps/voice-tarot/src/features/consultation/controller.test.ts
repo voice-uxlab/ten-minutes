@@ -145,7 +145,11 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   await controller.command("select_numbers", { picks: [7, 22] });
   expect(controller.getSnapshot().heading).toContain("1개만 더");
   expect(controller.getSnapshot().session.cards).toHaveLength(0);
+  await controller.command("select_numbers", { picks: [79] });
+  expect(controller.getSnapshot().retryNumbers).toBe(true);
+  expect(controller.getSnapshot().session.picks).toEqual([7, 22]);
   await controller.command("select_numbers", { picks: [22, 51] });
+  expect(controller.getSnapshot().retryNumbers).toBe(false);
   expect(controller.getSnapshot().session.picks).toEqual([7, 22, 51]);
   await controller.command("confirm_cards");
   const chosen = structuredClone(controller.getSnapshot().session.cards);

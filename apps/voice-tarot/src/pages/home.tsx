@@ -20,7 +20,7 @@ import { profile, saveProfile, saveSession } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PolicyDialog } from "@/components/ui/dialog";
-import { Reader, Panel } from "@/components/tarot";
+import { BrandHeader, Reader, Panel } from "@/components/tarot";
 
 const loginAttemptKey = "voice-tarot:login-attempt";
 const recentLoginKey = "voice-tarot:recent-login";
@@ -36,16 +36,23 @@ function loginProvider(provider: string | null): LoginProvider | null {
 function LandingIntro() {
   return (
     <>
+      <h1 className="landing-title">텐미닛 타로</h1>
       <p className="invitation">
         오늘 고민은 언니가 들어줄게.
-        <br />
-        공주야, 편하게 시작해.
+        <br />딱 10분, 편하게 이야기해.
       </p>
-      <img
-        className="home-art"
-        src="/assets/home-art.png"
-        alt="전화기를 든 캐릭터와 은빛 VOICE TAROT 로고"
-      />
+      <div className="landing-art">
+        <img
+          className="landing-reader"
+          src="/assets/metallic/landing-reader.png"
+          alt="타로 리더 레나"
+        />
+        <img
+          className="landing-logo"
+          src="/assets/metallic/landing-logo.png"
+          alt="TEN MINS TAROT"
+        />
+      </div>
     </>
   );
 }
@@ -316,6 +323,9 @@ export function Home({
     [voiceEngine, setVoiceEngine] = useState(initialVoiceEngine),
     [personaId, setPersonaId] = useState<PersonaId>("cool-unnie"),
     [mic, setMic] = useState(false),
+    [microphoneDenied, setMicrophoneDenied] = useState(false),
+    [showPrivacy, setShowPrivacy] = useState(false),
+    [menu, setMenu] = useState(false),
     [consent, setConsent] = useState(false),
     [record, setRecord] = useState(false),
     [error, setError] = useState(""),
@@ -406,74 +416,134 @@ export function Home({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
       setMic(true);
+      setMicrophoneDenied(false);
       setError("");
     } catch {
-      setError(
-        "브라우저의 사이트 설정에서 마이크 권한을 허용한 뒤 다시 시도해 주세요.",
-      );
+      setMic(false);
+      setMicrophoneDenied(true);
     }
   }
-  return (
-    <section className="page intro">
-      <fieldset className="panel consultation-options" disabled={create.isPending}>
-        <legend>상담 버전 선택</legend>
-        <label className="consent">
-          <input
-            type="radio"
-            name="voice-engine"
-            value="realtime"
-            checked={voiceEngine === "realtime"}
-            onChange={() => setVoiceEngine("realtime")}
-          />
-          Realtime + Typecast
-        </label>
-        <label className="consent">
-          <input
-            type="radio"
-            name="voice-engine"
-            value="live-typecast"
-            checked={voiceEngine === "live-typecast"}
-            onChange={() => setVoiceEngine("live-typecast")}
-          />
-          Live + Typecast
-        </label>
-        <p className="hint">
-          둘 다 레나의 목소리 · 1.3배속이에요. 새 통화에 선택한 버전을 적용해요.
-        </p>
-      </fieldset>
-      <fieldset className="panel consultation-options" disabled={create.isPending}>
-        <legend>테스트 · 페르소나 선택</legend>
-        {personas.map((persona) => (
-          <label className="consent" key={persona.id}>
-            <input
-              type="radio"
-              name="persona"
-              checked={personaId === persona.id}
-              onChange={() => setPersonaId(persona.id)}
-            />
-            {persona.label}
-          </label>
-        ))}
-        <p className="hint">
-          새 음성 통화에 적용돼요. 이어보기는 기존 선택을 유지하고, 시범 통화는
-          고정 예시예요.
-        </p>
-      </fieldset>
-      <header>
-        <Link to="/login">‹ HOME</Link>
-        {auth.data ? (
-          <Button
-            variant="ghost"
-            disabled={signOut.isPending}
-            onClick={() => signOut.mutate()}
-          >
-            로그아웃
+  if (microphoneDenied)
+    return (
+      <section
+        className="page metallic-page recovery-page"
+        data-phase="permission"
+      >
+        <BrandHeader>
+          <span className="timer glass">● 준비</span>
+        </BrandHeader>
+        <Reader status="마이크 설정을 확인해줘" />
+        <h1>{"공주 목소리를\n들을 수 있게 해줘."}</h1>
+        <p className="hint">마이크 접근이 허용되지 않았어요</p>
+        <Panel title="NOTICE">
+          <p>
+            브라우저의 사이트 설정에서 마이크 접근을 허용한 뒤 다시 시도해줘.
+          </p>
+          <p>다른 앱이 마이크를 사용 중이라면 그 앱을 닫고 다시 확인해줘.</p>
+        </Panel>
+        <div className="action-stack recovery-actions">
+          <Button size="wide" onClick={() => void allowMic()}>
+            마이크 다시 확인하기
           </Button>
-        ) : null}
-      </header>
-      {signOut.error ? <p role="alert">{signOut.error.message}</p> : null}
-      <Reader />
-      <Panel title="message from 언니" className="greeting-panel">
+          <Button size="wide" onClick={() => setMicrophoneDenied(false)}>
+            홈으로
+          </Button>
+        </div>
+      </section>
+    );
+  if (showPrivacy)
+    return (
+      <section className="page metallic-page privacy-page">
+        <BrandHeader>
+          <button
+            type="button"
+            className="round-action glass"
+            aria-label="녹음 안내 닫기"
+            onClick={() => setShowPrivacy(false)}
+          >
+            ×
+          </button>
+        </BrandHeader>
+        <p className="hint">녹음 안내</p>
+        <h1>{"목소리는 오직\n타로 상담을 위해"}</h1>
+        <p>TEN MINUTES의 타로 상담과 상담 리포트 제공에 목소리를 이용해요.</p>
+        <Panel title="VOICE PRIVACY">
+          <h2>어떤 정보를, 왜 쓰나요?</h2>
+          <p>{aiProcessing}</p>
+          <h2>마이크 허용과 녹음 저장은 별개예요</h2>
+          <p>
+            녹음은 내 마이크에만 적용돼요. 녹음을 선택하면 종료 후 파일로 저장할
+            수 있고, 로컬 테스트에서는 서버에도 저장해요.
+          </p>
+          <h2>상담 기록은 어디에 남나요?</h2>
+          <p>
+            상담 요약은 이 브라우저에 저장해요. 질문과 카드는 상담을 이어볼 수
+            있도록 앱 서버에 보관해요.
+          </p>
+        </Panel>
+        <p className="hint">녹음 저장 여부는 별도로 선택할 수 있어요.</p>
+        <Button size="wide" onClick={() => setShowPrivacy(false)}>
+          확인했어요
+        </Button>
+      </section>
+    );
+  return (
+    <section className="page intro metallic-page">
+      <BrandHeader>
+        <button
+          type="button"
+          className="round-action glass"
+          aria-label={menu ? "메뉴 닫기" : "메뉴 열기"}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setMenu(false);
+          }}
+          aria-expanded={menu}
+          aria-controls={menu ? "home-menu" : undefined}
+          onClick={() => setMenu(!menu)}
+        >
+          {menu ? "×" : "☰"}
+        </button>
+      </BrandHeader>
+      {menu && (
+        <>
+          <button
+            type="button"
+            className="menu-backdrop"
+            aria-label="메뉴 바깥 영역 닫기"
+            onClick={() => setMenu(false)}
+            tabIndex={-1}
+          />
+          <nav
+            className="home-menu panel"
+            id="home-menu"
+            aria-label="메뉴"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setMenu(false);
+            }}
+          >
+            <small>MENU</small>
+            <Link className="report-menu-item" to="/reports">
+              <span>
+                <b>내 리포트</b>
+                <small>지난 상담을 다시 읽어보세요</small>
+              </span>
+              <span aria-hidden="true">›</span>
+            </Link>
+            {auth.data && (
+              <Button
+                variant="ghost"
+                disabled={signOut.isPending}
+                onClick={() => signOut.mutate()}
+              >
+                로그아웃
+              </Button>
+            )}
+            {signOut.error && <p role="alert">{signOut.error.message}</p>}
+          </nav>
+        </>
+      )}
+      <Reader profile />
+      <Panel title="MESSAGE" className="greeting-panel">
         <h1>{nick || "공주"}야, 안녕!</h1>
         <p>
           오늘 무슨 일 있었어?
@@ -499,10 +569,7 @@ export function Home({
           <span>▥</span>
           <div>
             <b>상담 녹음 동의 · 선택</b>
-            <small>
-              내 목소리를 녹음해요. 로컬 테스트에서는 서버의 로그 폴더에도
-              저장해요.
-            </small>
+            <small>녹음 없이도 상담할 수 있어요.</small>
           </div>
           <input
             type="checkbox"
@@ -512,20 +579,19 @@ export function Home({
             aria-label="내 목소리 녹음 동의"
           />
         </label>
-        <PolicyDialog title="녹음 안내 보기">
-          내 마이크만 녹음해요. 로컬 테스트에서는 서버에도 저장해요. AI 음성은
-          포함되지 않고, 종료 후 파일로 저장할 수 있어요. 녹음 없이도 상담할 수
-          있어요.
-        </PolicyDialog>
+        <button
+          className="text-button underline"
+          onClick={() => setShowPrivacy(true)}
+        >
+          녹음 안내 보기
+        </button>
         <label className="consent">
           <input
             type="checkbox"
             checked={consent}
             onChange={(e) => setConsent(e.target.checked)}
           />{" "}
-          {voiceEngine === "live-noeul"
-            ? "음성을 OpenAI에 전송하여 음성 상담을 진행하는 데 동의해요."
-            : aiProcessing}
+          상담을 위한 음성 처리에 동의해요.
         </label>
       </Panel>
       <Button
@@ -549,33 +615,93 @@ export function Home({
           ? "준비됐어, 공주야. 편하게 시작해."
           : "마이크와 음성 처리에 동의하면 시작할 수 있어요."}
       </p>
-      {import.meta.env.DEV ? (
-        <Panel title="테스트 대화 로그">
-          <p>
-            새 음성 통화는 대화·도구·재생 이벤트를 로컬 서버의 .test-logs 폴더에
-            자동 저장해요.
+      <details
+        className="home-options"
+        open={initialVoiceEngine === "live-typecast" || undefined}
+      >
+        <summary>상담 옵션</summary>
+        <fieldset
+          className="panel consultation-options"
+          disabled={create.isPending}
+        >
+          <legend>상담 버전 선택</legend>
+          <label className="consent">
+            <input
+              type="radio"
+              name="voice-engine"
+              value="realtime"
+              checked={voiceEngine === "realtime"}
+              onChange={() => setVoiceEngine("realtime")}
+            />
+            Realtime + Typecast
+          </label>
+          <label className="consent">
+            <input
+              type="radio"
+              name="voice-engine"
+              value="live-typecast"
+              checked={voiceEngine === "live-typecast"}
+              onChange={() => setVoiceEngine("live-typecast")}
+            />
+            Live + Typecast
+          </label>
+          <p className="hint">
+            둘 다 레나의 목소리 · 1.3배속이에요. 새 통화에 선택한 버전을
+            적용해요.
           </p>
-          <Button
-            disabled={exporting}
-            onClick={async () => {
-              setExporting(true);
-              setExportStatus("");
-              try {
-                const count = await exportSavedConversations();
-                setExportStatus(`이전 대화 ${count}개를 .md로 저장했어요.`);
-              } catch {
-                setExportStatus(
-                  "일부 로그 저장에 실패했어요. 로컬 서버 연결을 확인해 주세요.",
-                );
-              } finally {
-                setExporting(false);
-              }
-            }}
-          >
-            {exporting ? "저장 중…" : "이 브라우저의 이전 대화도 .md로 저장"}
-          </Button>
-          <p role="status">{exportStatus}</p>
-        </Panel>
+        </fieldset>
+        <fieldset
+          className="panel consultation-options"
+          disabled={create.isPending}
+        >
+          <legend>테스트 · 페르소나 선택</legend>
+          {personas.map((persona) => (
+            <label className="consent" key={persona.id}>
+              <input
+                type="radio"
+                name="persona"
+                checked={personaId === persona.id}
+                onChange={() => setPersonaId(persona.id)}
+              />
+              {persona.label}
+            </label>
+          ))}
+          <p className="hint">
+            새 음성 통화에 적용돼요. 이어보기는 기존 선택을 유지하고, 시범
+            통화는 고정 예시예요.
+          </p>
+        </fieldset>
+      </details>
+      {import.meta.env.DEV ? (
+        <details className="home-options">
+          <summary>테스트 대화 로그</summary>
+          <Panel title="테스트 대화 로그">
+            <p>
+              새 음성 통화는 대화·도구·재생 이벤트를 로컬 서버의 .test-logs
+              폴더에 자동 저장해요.
+            </p>
+            <Button
+              disabled={exporting}
+              onClick={async () => {
+                setExporting(true);
+                setExportStatus("");
+                try {
+                  const count = await exportSavedConversations();
+                  setExportStatus(`이전 대화 ${count}개를 .md로 저장했어요.`);
+                } catch {
+                  setExportStatus(
+                    "일부 로그 저장에 실패했어요. 로컬 서버 연결을 확인해 주세요.",
+                  );
+                } finally {
+                  setExporting(false);
+                }
+              }}
+            >
+              {exporting ? "저장 중…" : "이 브라우저의 이전 대화도 .md로 저장"}
+            </Button>
+            <p role="status">{exportStatus}</p>
+          </Panel>
+        </details>
       ) : null}
       <div className="extras">
         <Button

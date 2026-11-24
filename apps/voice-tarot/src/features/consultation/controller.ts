@@ -43,6 +43,8 @@ export interface View {
   caption: string;
   status: string;
   error: string;
+  startIssue?: "microphone";
+  retryNumbers?: boolean;
   muted: boolean;
   bgm: boolean;
   remaining: number;
@@ -337,8 +339,17 @@ export class Consultation {
     }
     const r = await this.action(name, args);
     this.testLogger.log("tool.result", { name, result: r });
-    if (r.error || r.unchanged) return r;
     const s = this.view.session;
+    if (name === "select_numbers") {
+      const invalid = Array.isArray(r.invalid) && r.invalid.length > 0;
+      const emptyVoicePick =
+        args.replace !== true && Array.isArray(args.picks) && !args.picks.length;
+      this.update({
+        retryNumbers:
+          s.picks.length < selectionCount(s) && Boolean(r.error || invalid || emptyVoicePick),
+      });
+    }
+    if (r.error || r.unchanged) return r;
     switch (name) {
       case "review_question":
         this.show("question", "이 이야기를\n함께 살펴볼까?");
@@ -468,7 +479,7 @@ export class Consultation {
       "",
       "연결 상태를 확인하고 있어요.",
     );
-    this.update({ error: "" });
+    this.update({ error: "", startIssue: undefined });
     if (s.demo) {
       this.update({ status: "시범 리딩" });
       this.restore();
@@ -478,12 +489,14 @@ export class Consultation {
           status: "시범 리딩",
         });
         appendNote(s, "assistant", this.view.caption, undefined, "demo");
-      } else this.demoStep = s.cards.length ? s.revealed.length : -1;
+      } else this.demoStep = s.cards.length ? s.readingSlots.length : -1;
       return;
     }
+    let requestingMicrophone = false;
     try {
       this.audio = takeAudio();
       await this.audio.resume();
+      requestingMicrophone = true;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -491,6 +504,7 @@ export class Consultation {
           autoGainControl: true,
         },
       });
+      requestingMicrophone = false;
       if (stale()) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -752,7 +766,10 @@ export class Consultation {
     } catch (e) {
       if (stale()) return;
       this.stopTransport();
-      this.update({ phase: "error" });
+      this.update({
+        phase: "error",
+        startIssue: requestingMicrophone ? "microphone" : undefined,
+      });
       this.failMessage(e);
     }
   }
@@ -977,18 +994,25 @@ export class Consultation {
         });
         return;
       }
-      const n = this.demoStep++,
+      const n = this.demoStep,
         count = s.cards.length;
       let caption = "";
       if (n < count) {
         const slot = n + 1;
-        const revealed = await this.command("reveal_card", { slot });
-        if (revealed.error) throw Error(revealed.error);
+        if (!s.revealed.includes(slot)) {
+          const revealed = await this.command("reveal_card", { slot });
+          if (revealed.error) throw Error(revealed.error);
+          return;
+        }
         const r = await this.command("show_reading", { slot });
+        if (r.error) throw Error(r.error);
+        this.demoStep++;
         const card = r.context?.cards[0];
         caption = card ? `${card.position}, ${card.name} 카드야. ${card.keywords}.` : "";
       } else if (n === count) {
-        await this.command("show_reading", { slot: 0 });
+        const result = await this.command("show_reading", { slot: 0 });
+        if (result.error) throw Error(result.error);
+        this.demoStep++;
         caption =
           "시범 통화는 카드 지식과 배치를 보여주는 예시야. 실제 통화에서는 네 상황과 카드 사이의 관계를 함께 읽어줄게.";
       } else {

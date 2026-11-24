@@ -189,7 +189,9 @@ export const server = createServer(async (req, res) => {
     }
     // Production SPA assets are restricted to the build directory; never serve env/source files.
     if (process.env.SERVE_REACT === "1" && req.method === "GET") {
-      const asset = /^\/assets\/[a-zA-Z0-9_.-]+$/.test(path);
+      const asset =
+        /^\/assets\/(?:metallic\/)?[a-zA-Z0-9_.-]+$/.test(path) ||
+        path === "/fonts/PretendardVariable.woff2";
       const route =
         path === "/" ||
         [
@@ -198,6 +200,8 @@ export const server = createServer(async (req, res) => {
           "/tickets",
           "/payments/result",
           "/screens",
+          "/reports",
+          "/invite/christmas",
           "/live-lab",
         ].includes(path) ||
         /^\/sessions\/[a-f0-9]{48}(?:\/report)?$/.test(path);
@@ -215,6 +219,7 @@ export const server = createServer(async (req, res) => {
                   js: "text/javascript",
                   css: "text/css",
                   png: "image/png",
+                  woff2: "font/woff2",
                   html: "text/html; charset=utf-8",
                 } as Record<string, string>
               )[ext || ""] || "application/octet-stream",

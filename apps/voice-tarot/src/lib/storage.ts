@@ -26,3 +26,23 @@ export function loadSession(id: string): Session | undefined {
     return undefined;
   }
 }
+
+export function localReports(): Session[] {
+  const prefix = "queen:session:";
+  const reports: Session[] = [];
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    const session = loadSession(key.slice(prefix.length));
+    if (session?.report && session.ended) reports.push(session);
+  }
+  const previous = profile().last;
+  if (
+    previous?.report &&
+    previous.ended &&
+    !reports.some((session) => session.readingId === previous.readingId)
+  ) {
+    reports.push(previous);
+  }
+  return reports.sort((a, b) => b.date.localeCompare(a.date));
+}
