@@ -1,5 +1,4 @@
 import hashlib
-import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -51,7 +50,6 @@ from .schemas import (
     ShareLinkResponse,
     TTSRequest,
     UpdateCurrentUserRequest,
-    VoiceHangupTask,
 )
 from .serializers import (
     card_response,
@@ -63,14 +61,11 @@ from .serializers import (
 
 from .voice import (
     active_consultation,
-    close_scheduled_consultation,
+    close_consultation_calls,
     create_voice_connection,
     release_tts,
     reserve_tts,
 )
-from .voice_tasks import HANGUP_PATH, authenticate_voice_task, schedule_voice_hangup
-
-logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1", responses=AUTHENTICATED_RESPONSES)
@@ -315,7 +310,7 @@ def select_cards(
             "spread_type": consultation.spread_type,
             "cards": [card_response(card) for card in consultation.cards],
         }
-    active_consultation(consultation, datetime.now(timezone.utc))
+    active_consultation(consultation)
     consultation.question = body.question
     consultation.spread_type = body.spread_type.value
     consultation.status = "ACTIVE"
@@ -387,7 +382,7 @@ def reveal_card(
         if previous.revealed_at is None:
             raise APIError(409, "PREVIOUS_CARD_NOT_REVEALED", "Reveal the previous card first.")
     if card.revealed_at is None:
-        active_consultation(consultation, datetime.now(timezone.utc))
+        active_consultation(consultation)
         card.revealed_at = datetime.now(timezone.utc)
         db.commit()
     return {"card": card_response(card)}
@@ -398,7 +393,7 @@ def reveal_card(
     response_model=ConsultationResponse,
     tags=["consultations"],
     summary="End consultation",
-    description="Stores the termination reason and timestamp. Returns the existing result when the consultation has already ended.",
+    description="Stores the termination reason and closes any open Realtime connection. Repeating the request retries an unconfirmed hangup.",
     responses={404: CONSULTATION_NOT_FOUND_RESPONSE, 422: VALIDATION_RESPONSE},
 )
 def end_consultation(
@@ -426,29 +421,10 @@ def end_consultation(
     )
     db.commit()
     if needs_hangup:
-        try:
-            schedule_voice_hangup(settings, str(consultation_id), datetime.now(timezone.utc), early=True)
-        except APIError:
-            # The original deadline task remains queued.
-            logger.warning("Could not schedule an early Realtime hangup")
+        if not settings.openai_api_key:
+            raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
+        close_consultation_calls(db, str(consultation_id), settings.openai_api_key)
     return result
-
-
-@router.post(
-    HANGUP_PATH.removeprefix("/api/v1"),
-    status_code=204,
-    include_in_schema=False,
-    dependencies=[Depends(authenticate_voice_task)],
-)
-def run_voice_hangup(
-    body: VoiceHangupTask,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    if not settings.openai_api_key:
-        raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
-    close_scheduled_consultation(db, str(body.consultation_id), settings.openai_api_key)
-    return Response(status_code=204)
 
 
 @router.put(
@@ -736,11 +712,10 @@ async def tts_stream(
         raise APIError(503, "TYPECAST_NOT_CONFIGURED", "Typecast speech synthesis is not configured.")
     consultation_key = str(consultation_id)
     bind = db.get_bind()
-    lease, deadline = await run_in_threadpool(reserve_tts, db, consultation_key, user.id, len(body.text), settings)
+    lease = await run_in_threadpool(reserve_tts, db, consultation_key, user.id, len(body.text), settings)
     client = httpx.AsyncClient(timeout=15)
     upstream = None
-    left = min(30, deadline - datetime.now(timezone.utc).timestamp())
-    end_time = anyio.current_time() + left
+    end_time = anyio.current_time() + 30
     cleaned = False
 
     async def cleanup():

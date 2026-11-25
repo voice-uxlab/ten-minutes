@@ -119,7 +119,7 @@ export function ReportsPage() {
         </Link>
       </BrandHeader>
       <h1>내 리포트</h1>
-      <p>언니와 나눈 10분, 다시 꺼내봐.</p>
+      <p>언니와 나눈 이야기, 다시 꺼내봐.</p>
       <p className="hint">최근 상담순</p>
       {history.isPending && <p role="status">리포트를 불러오고 있어요.</p>}
       {history.isError && (
@@ -199,7 +199,7 @@ export function ChristmasInvite() {
         />
       </div>
       <Panel title="MESSAGE" icon="flower" endIcon="flower">
-        <h2>10분, 내 이야기로 보는 타로</h2>
+        <h2>내 이야기로 보는 타로</h2>
         <p>
           카드를 한 장씩 뽑으며, 타로 언니에게
           <br />내 상황에 맞는 연애운을 들어봐.

@@ -164,7 +164,6 @@ async function session() {
     ...emptyReading,
     ...created.state,
     readingId: consultationId,
-    endAt: Date.now() + 600000,
     demo: false,
     date: new Date().toISOString(),
     notes: [],
@@ -268,11 +267,10 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   );
   expect(saved.report?.readings).toHaveLength(3);
 });
-test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {
+test("Realtime duplicate tool events mutate once; FastAPI reconnects to the same consultation", async () => {
   mockRealtime();
   controller = new Consultation(await session());
   await controller.start();
-  const deadline = controller.getSnapshot().session.endAt;
   await controller.event({
     type: "response.created",
     response: { id: "spoken" },
@@ -328,7 +326,6 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
   controller.dispose();
   controller = new Consultation(loadSession(id)!);
   await controller.start();
-  expect(controller.getSnapshot().session.endAt).toBe(deadline);
   expect(
     vi
       .mocked(fetch)

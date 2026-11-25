@@ -18,7 +18,6 @@ from .models import (
     ensure_utc,
     uuid_string,
 )
-from .voice_tasks import schedule_voice_hangup
 
 OPENAI_CALLS = "https://api.openai.com/v1/realtime/calls"
 PROMPTS = Path(__file__).parent / "prompts"
@@ -26,11 +25,9 @@ INSTRUCTIONS = (PROMPTS / "tarot_reader.md").read_text(encoding="utf-8")
 TOOLS = json.loads((PROMPTS / "realtime_tools.json").read_text(encoding="utf-8"))
 
 
-def active_consultation(consultation: Consultation, now: datetime) -> None:
+def active_consultation(consultation: Consultation) -> None:
     if consultation.status in {"ENDED", "ENDING", "FAILED"}:
         raise APIError(409, "CONSULTATION_STATE_CONFLICT", "The consultation has ended.")
-    if consultation.call_ends_at <= now:
-        raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
 
 
 def lock_account(db: Session, user_id: str) -> None:
@@ -60,11 +57,11 @@ def locked_daily_usage(db: Session, user_id: str, now: datetime) -> VoiceAccount
 
 def reserve_connection(
     db: Session, consultation_id: str, user_id: str, settings: Settings
-) -> tuple[str, list[str], datetime]:
+) -> tuple[str, list[str]]:
     lock_account(db, user_id)
     consultation = lock_consultation(db, consultation_id, user_id)
     now = datetime.now(timezone.utc)
-    active_consultation(consultation, now)
+    active_consultation(consultation)
     if consultation.voice_reservation_until and ensure_utc(consultation.voice_reservation_until) > now:
         raise APIError(409, "VOICE_CONNECTION_PENDING", "A voice connection is already being created.")
     active_id = db.scalar(
@@ -93,11 +90,9 @@ def reserve_connection(
     usage.connection_attempts += 1
     consultation.voice_connection_attempts += 1
     consultation.voice_reservation = reservation
-    # Keep the lease visible if the deadline passes during the upstream handshake.
     consultation.voice_reservation_until = now + timedelta(seconds=60)
-    deadline = consultation.call_ends_at
     db.commit()
-    return reservation, prior, deadline
+    return reservation, prior
 
 
 def hangup(client: httpx.Client, call_id: str, api_key: str) -> bool:
@@ -115,11 +110,8 @@ def close_record(db: Session, call_id: str) -> None:
 def create_voice_connection(
     db: Session, consultation_id: str, user_id: str, offer: str, settings: Settings
 ) -> str:
-    reservation, prior_calls, deadline = reserve_connection(db, consultation_id, user_id, settings)
+    reservation, prior_calls = reserve_connection(db, consultation_id, user_id, settings)
     try:
-        schedule_voice_hangup(settings, consultation_id, deadline)
-        if datetime.now(timezone.utc) >= deadline:
-            raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
         with httpx.Client(timeout=10) as client:
             for prior in prior_calls:
                 if not hangup(client, prior, settings.openai_api_key):
@@ -157,11 +149,11 @@ def create_voice_connection(
                 accepted = (
                     consultation.voice_reservation == reservation
                     and consultation.status not in {"ENDED", "ENDING", "FAILED"}
-                    and consultation.call_ends_at > now
                     and response.text.startswith("v=0")
                 )
+                hangup_at = datetime.max.replace(tzinfo=timezone.utc)
                 db.add(RealtimeCall(id=call_id, consultation_id=consultation_id,
-                                    hangup_at=consultation.call_ends_at if accepted else now))
+                                    hangup_at=hangup_at if accepted else now))
                 if accepted and consultation.status == "CREATED":
                     consultation.status = "CONNECTING"
                 db.commit()
@@ -187,19 +179,13 @@ def create_voice_connection(
             db.commit()
 
 
-def close_scheduled_consultation(db: Session, consultation_id: str, api_key: str) -> None:
+def close_consultation_calls(db: Session, consultation_id: str, api_key: str) -> None:
     consultation = db.scalar(
         select(Consultation).where(Consultation.id == consultation_id).with_for_update()
     )
     if consultation is None:
         return
     now = datetime.now(timezone.utc)
-    if consultation.ended_at is None:
-        if consultation.call_ends_at > now:
-            raise APIError(503, "VOICE_HANGUP_NOT_DUE", "The voice hangup is not yet due.")
-        consultation.status = "ENDED"
-        consultation.ended_at = consultation.call_ends_at
-        consultation.end_reason = "TIMEOUT"
 
     pending = consultation.voice_reservation_until
     call_ids = list(db.scalars(select(RealtimeCall.id).where(
@@ -220,14 +206,14 @@ def close_scheduled_consultation(db: Session, consultation_id: str, api_key: str
 
 def reserve_tts(
     db: Session, consultation_id: str, user_id: str, characters: int, settings: Settings
-) -> tuple[str, float]:
+) -> str:
     lock_account(db, user_id)
     consultation = lock_consultation(db, consultation_id, user_id)
     now = datetime.now(timezone.utc)
-    active_consultation(consultation, now)
+    active_consultation(consultation)
     if not db.scalar(select(RealtimeCall.id).where(
         RealtimeCall.consultation_id == consultation_id,
-        RealtimeCall.closed_at.is_(None), RealtimeCall.hangup_at > now,
+        RealtimeCall.closed_at.is_(None),
     ).limit(1)):
         raise APIError(409, "VOICE_CONNECTION_REQUIRED", "An active voice connection is required.")
     leases = {key: deadline for key, deadline in consultation.tts_leases.items() if deadline > now.timestamp()}
@@ -242,7 +228,7 @@ def reserve_tts(
     consultation.tts_leases = leases
     consultation.tts_characters += characters
     db.commit()
-    return lease, consultation.call_ends_at.timestamp()
+    return lease
 
 
 def release_tts(bind, consultation_id: str, lease: str) -> None:

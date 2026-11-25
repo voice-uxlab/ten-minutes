@@ -75,7 +75,7 @@ def consultation_response(consultation: Consultation) -> dict:
         "report_status": consultation.report.status if consultation.report else None,
         "created_at": ensure_utc(consultation.created_at),
         "ended_at": ensure_utc(consultation.ended_at),
-        "call_ends_at": consultation.call_ends_at,
+        "call_ends_at": None,
     }
 
 
