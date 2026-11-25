@@ -545,7 +545,7 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     assert client.request("POST", connection, json=offer).status_code == 409
 
 
-def test_deployed_consultation_without_deadline_retries_manual_hangup(authenticated_client, db_session, monkeypatch):
+def test_deadline_caps_heartbeat_and_rejects_reconnect_but_allows_hangup_retry(authenticated_client, db_session, monkeypatch):
     from datetime import datetime, timedelta, timezone
     from unittest.mock import Mock
 
@@ -574,13 +574,20 @@ def test_deployed_consultation_without_deadline_retries_manual_hangup(authentica
     consultation = client.request(
         "POST", "/api/v1/consultations", json={"consent_version": "2026-11"},
     ).json()
-    assert consultation["call_ends_at"] is None
+    assert datetime.fromisoformat(consultation["call_ends_at"].replace("Z", "+00:00")) - datetime.fromisoformat(consultation["created_at"].replace("Z", "+00:00")) == timedelta(minutes=10)
 
     stored = db_session.get(Consultation, consultation["id"])
-    stored.created_at = datetime.now(timezone.utc) - timedelta(minutes=11)
+    stored.created_at = datetime.now(timezone.utc) - timedelta(minutes=9, seconds=10)
     db_session.commit()
     path = f"/api/v1/consultations/{stored.id}"
     assert client.request("POST", f"{path}/realtime-connection", json={"sdp": "v=0\r\noffer"}).status_code == 201
+    from app.voice import connection_token
+    assert client.request("POST", f"{path}/voice-heartbeat", json={"connection_token": connection_token("rtc_local")}).status_code == 204
+    from app.models import ensure_utc
+    assert ensure_utc(db_session.get(RealtimeCall, "rtc_local").hangup_at) == stored.call_ends_at
+    stored.created_at -= timedelta(minutes=1)
+    db_session.commit()
+    assert client.request("POST", f"{path}/realtime-connection", json={"sdp": "v=0\r\noffer"}).status_code == 409
     assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 503
     assert db_session.get(RealtimeCall, "rtc_local").closed_at is None
     assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 200

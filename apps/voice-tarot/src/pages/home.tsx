@@ -36,7 +36,7 @@ function LandingIntro() {
       <h1 className="landing-title">텐미닛 타로</h1>
       <p className="invitation">
         오늘 고민은 언니가 들어줄게.
-        <br />편하게 이야기해.
+        <br />딱 10분, 편하게 이야기해.
       </p>
       <div className="landing-art">
         <img
@@ -569,7 +569,7 @@ export function Home() {
         ) : (
           <>
             <MetallicIcon name="phone" />
-            상담 시작하기
+            10분 상담 시작하기
           </>
         )}
       </Button>

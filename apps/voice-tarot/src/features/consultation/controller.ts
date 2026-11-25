@@ -45,6 +45,7 @@ export interface View {
   startIssue?: "microphone";
   retryNumbers?: boolean;
   muted: boolean;
+  remaining: number;
   recording?: string;
   busy: boolean;
   active: number[];
@@ -140,6 +141,7 @@ export class Consultation {
   }
 
   private recorder?: MediaRecorder;
+  private timer?: ReturnType<typeof setInterval>;
   private connectTimer?: ReturnType<typeof setTimeout>;
   private heartbeatTimer?: ReturnType<typeof setTimeout>;
   private heartbeatAbort?: AbortController;
@@ -152,6 +154,7 @@ export class Consultation {
   private caption = "";
   private realtimeSpeechBuffer = "";
   private stopped = false;
+  private warned = false;
   private generation = 0;
   private inputContexts = new Map<string, NoteContext>();
   private latestInput?: NoteContext;
@@ -180,6 +183,7 @@ export class Consultation {
       status: "연결 준비",
       error: session.reportPending ? "리포트를 아직 저장하지 못했어요." : "",
       muted: false,
+      remaining: 0,
       busy: false,
       active: [],
     };
@@ -401,6 +405,10 @@ export class Consultation {
     if (!["idle", "error"].includes(this.view.phase) || this.view.session.ended)
       return;
     const s = this.view.session;
+    if (s.endAt && s.endAt <= Date.now()) {
+      await this.end("TIMEOUT");
+      return;
+    }
     this.stopped = false;
     const generation = ++this.generation;
     const stale = () => this.stopped || generation !== this.generation;
@@ -490,6 +498,8 @@ export class Consultation {
       this.persist();
       this.startRecording(record);
       if (connectionToken) this.startHeartbeat(connectionToken);
+      this.timer = setInterval(() => this.tick(), 500);
+      this.tick();
       try {
         this.wake = await navigator.wakeLock?.request("screen");
         if (stale()) void this.wake?.release();
@@ -505,7 +515,8 @@ export class Consultation {
           this.stopTransport();
           this.update({
             phase: "error",
-            error: "연결이 잠깐 끊겼어. 같은 카드로 다시 연결할 수 있어.",
+            error:
+              "연결이 잠깐 끊겼어. 같은 카드와 남은 시간으로 다시 연결할 수 있어.",
           });
         }
       };
@@ -748,6 +759,10 @@ export class Consultation {
           [401, 404, 409].includes(error.status)
         ) {
           if (this.view.phase === "ending") return;
+          if ((this.view.session.endAt ?? Infinity) <= Date.now()) {
+            await this.end("TIMEOUT");
+            return;
+          }
           this.stopTransport();
           this.update({
             phase: "error",
@@ -760,6 +775,18 @@ export class Consultation {
         this.heartbeatTimer = setTimeout(() => void beat(), 30000);
     };
     void beat();
+  }
+  private tick() {
+    const left = Math.max(
+      0,
+      Math.ceil(((this.view.session.endAt || 0) - Date.now()) / 1000),
+    );
+    this.update({ remaining: left });
+    if (left > 0 && left <= 60 && !this.warned) {
+      this.warned = true;
+      this.note("1분 남았어. 하던 해석을 마무리해. ");
+    }
+    if (!left) void this.end("TIMEOUT");
   }
 
   private startRecording(enabled: boolean) {
@@ -796,7 +823,7 @@ export class Consultation {
       queen_line: "네 마음에 먼저 답해줘. 선택하는 건 너야.",
     };
   }
-  async end() {
+  async end(reason: "USER" | "TIMEOUT" = "USER") {
     if (["ending", "ended"].includes(this.view.phase)) return;
     this.update({ phase: "ending" });
     finishNotes(this.view.session);
@@ -809,20 +836,23 @@ export class Consultation {
 
     this.speech?.close();
     this.stream?.getTracks().forEach((t) => t.stop());
+    clearInterval(this.timer);
     this.view.session.report = this.fallback();
     this.view.session.reportPending = true;
     this.persist();
+    if (reason === "TIMEOUT") this.stopTransport();
     await this.queue.catch(() => {});
     const s = this.view.session;
+    const remaining = (s.endAt ?? Date.now()) - Date.now();
     let result: Partial<Report> | null = null;
-    if (this.dc?.readyState === "open") {
+    if (reason === "USER" && remaining > 0 && this.dc?.readyState === "open") {
       if (this.responding) this.send({ type: "response.cancel" });
       const eventId = `report-${s.readingId}`;
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         result = await new Promise<Partial<Report> | null>((resolve) => {
           this.reportRequest = { eventId, resolve };
-          timeout = setTimeout(() => resolve(null), 25000);
+          timeout = setTimeout(() => resolve(null), Math.min(25000, remaining));
           if (
             !this.send({
               type: "response.create",
@@ -865,6 +895,7 @@ export class Consultation {
         this.reportRequest = undefined;
       }
     }
+    this.stopTransport();
     const base = this.fallback();
     const summary =
       typeof result?.summary === "string" ? result.summary.trim() : "";
@@ -894,19 +925,20 @@ export class Consultation {
     };
     this.view.session.reportPending = true;
     this.persist();
-    try {
-      await this.saveReport();
-    } finally {
-      this.stopTransport();
-    }
+    await this.saveReport(reason);
   }
-  async saveReport() {
+  async saveReport(
+    reason: "USER" | "TIMEOUT" = this.view.session.endAt &&
+    this.view.session.endAt <= Date.now()
+      ? "TIMEOUT"
+      : "USER",
+  ) {
     if (this.savingReport || !this.view.session.report) return;
     this.savingReport = true;
     const s = this.view.session;
     this.update({ error: "", busy: true });
     try {
-      await finishConsultation(s.readingId, s.report!);
+      await finishConsultation(s.readingId, reason, s.report!);
       void queryClient.invalidateQueries({ queryKey: reportsKey });
       void queryClient.invalidateQueries({ queryKey: ["report", s.readingId] });
       void queryClient.invalidateQueries({
@@ -928,6 +960,7 @@ export class Consultation {
     this.readingPlaybackSlot = 0;
     this.stopped = true;
     this.generation++;
+    clearInterval(this.timer);
     clearTimeout(this.connectTimer);
     clearTimeout(this.heartbeatTimer);
     this.heartbeatAbort?.abort();

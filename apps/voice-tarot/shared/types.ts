@@ -71,6 +71,7 @@ export interface Session extends Reading {
   transcript: string[];
   notes: Note[];
   date: string;
+  endAt?: number;
   connected?: boolean;
   report?: Report;
   reportPending?: boolean;

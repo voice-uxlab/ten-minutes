@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import (
@@ -129,6 +129,10 @@ class Consultation(Base):
     voice_reservation_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     tts_characters: Mapped[int] = mapped_column(Integer, default=0)
     tts_leases: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+
+    @property
+    def call_ends_at(self) -> datetime:
+        return ensure_utc(self.created_at) + timedelta(minutes=10)
 
     cards: Mapped[list["ConsultationCard"]] = relationship(
         back_populates="consultation", cascade="all, delete-orphan", order_by="ConsultationCard.slot"

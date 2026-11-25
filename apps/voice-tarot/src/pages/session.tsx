@@ -219,6 +219,10 @@ function Call({ initial }: { initial: Session }) {
   const summary = v.phase === "reading" && s.summaryVisited && !focused;
   const retry = selecting && v.retryNumbers;
   const phase = retry ? "retry-numbers" : summary ? "summary" : v.phase;
+  const timer =
+    v.phase === "connecting"
+      ? "연결 중"
+      : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`;
   const ordinal =
     focused && ["첫 번째", "두 번째", "세 번째"][focused.slot - 1];
   const heading = retry
@@ -237,8 +241,10 @@ function Call({ initial }: { initial: Session }) {
   return (
     <section className="page metallic-page call-page" data-phase={phase}>
       <BrandHeader>
-        <span className="timer glass">
-          ● {v.phase === "connecting" ? "연결 중" : "상담 중"}
+        <span
+          className={`timer glass${v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
+        >
+          ● {timer}
         </span>
       </BrandHeader>
       {v.phase === "reveal" && focused ? (
