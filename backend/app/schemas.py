@@ -80,6 +80,7 @@ class CurrentUserResponse(StrictModel):
     nickname: Optional[str] = Field(description="Display name used when addressing mode is CUSTOM")
     provider: Optional[str] = Field(description="Connected OAuth provider, or null when no identity is linked")
     onboarding_required: bool = Field(description="Whether display-name or required-consent setup is incomplete")
+    consent_version: Optional[str] = Field(description="The last AI-processing consent version accepted by this user")
     created_at: datetime = Field(description="User creation timestamp in UTC ISO 8601 format")
 
 
@@ -150,6 +151,7 @@ class ConsultationResponse(StrictModel):
     report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report exists")
     created_at: datetime = Field(description="Consultation creation timestamp")
     ended_at: Optional[datetime] = Field(description="Consultation end timestamp, or null while active")
+    call_ends_at: datetime = Field(description="Server deadline for the ten-minute call")
 
 
 class ConsultationListItem(StrictModel):
@@ -239,9 +241,9 @@ class SaveReportRequest(StrictModel):
 class ReportResponse(StrictModel):
     consultation_id: UUID = Field(description="Consultation ID associated with the report")
     status: ReportStatus = Field(description="Report generation state")
-    spread_type: SpreadType = Field(description="Spread type used for the consultation")
+    spread_type: Optional[SpreadType] = Field(description="Spread type used for the consultation")
     consulted_at: datetime = Field(description="Consultation start timestamp")
-    question: str = Field(description="Question confirmed during the consultation")
+    question: Optional[str] = Field(description="Confirmed question, or null if the call ended early")
     cards: list[ReportCardResponse] = Field(description="Revealed cards with images and individual readings")
     situation_summary: str = Field(description="One-line situation summary")
     readings: list[CardReading] = Field(description="Per-slot card readings")

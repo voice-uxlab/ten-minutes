@@ -6,9 +6,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:api\" \"vite --host 127.0.0.1\"",
-    "dev:api": "PORT=3011 TTS_PROVIDER=typecast node --env-file-if-exists=.env server/server.ts",
-    "start": "SERVE_REACT=1 TTS_PROVIDER=typecast node --env-file-if-exists=.env server/server.ts",
+    "dev": "vite --host 127.0.0.1",
+    "start": "vite preview --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src server shared",

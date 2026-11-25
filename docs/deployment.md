@@ -29,7 +29,7 @@ VITE_AUTH_API_ORIGIN=https://ten-minutes-api-git-dev-voice-uxlab.vercel.app
 VITE_AUTH_CONSENT_VERSION=2026-11-v1
 ```
 
-`VITE_AUTH_API_ORIGIN`은 FastAPI 백엔드의 Preview origin입니다.
+`VITE_AUTH_API_ORIGIN`은 로그인과 상담 요청에 공통으로 사용하는 FastAPI 백엔드의 Preview origin입니다.
 
 `VITE_AUTH_CONSENT_VERSION`은 사용자가 동의한 AI 처리 안내 문구의 버전을 식별하기 위한 값입니다. 예를 들어 `2026-11-v1`, `2026-11-v2`와 같은 형식으로 관리합니다. 음성 전송, AI 답변 처리 등 관련 동의 문구가 변경되면 새로운 버전으로 변경해야 합니다.
 

@@ -1,8 +1,15 @@
 import type { NoteContext } from "./domain";
 import { takeAudio } from "./audio-context";
-import { request, readingRequest, queryClient } from "@/api/client";
+import { queryClient } from "@/api/client";
+import {
+  consultationCommand,
+  finishConsultation,
+  realtimeCredentials,
+  reportsKey,
+  streamSpeech,
+} from "@/api/consultations";
 import { type Session, type Report, type ReadingResult } from "@/api/types";
-import { saveSession } from "@/lib/storage";
+import { isLegacyReading, saveSession } from "@/lib/storage";
 import { SpeechPlayer, displaySpeech } from "./speech.ts";
 import {
   appendNote,
@@ -134,17 +141,22 @@ export class Consultation {
   private calls = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
   private touches: Promise<unknown> = Promise.resolve();
+  private savingReport = false;
   private reportResolve?: (report: Report | null) => void;
   private wake?: WakeLockSentinel;
   constructor(session: Session) {
     this.view = {
       session: structuredClone(session),
-      phase: session.ended ? "ended" : "idle",
+      phase: session.reportPending
+        ? "ending"
+        : session.ended
+          ? "ended"
+          : "idle",
       heading: "공주야,\n무슨 일 있었어?",
       hint: "",
       caption: "",
       status: "연결 준비",
-      error: "",
+      error: session.reportPending ? "리포트를 아직 저장하지 못했어요." : "",
       muted: false,
       remaining: 0,
       busy: false,
@@ -164,7 +176,17 @@ export class Consultation {
   }
   private persist() {
     try {
-      saveSession(this.view.session);
+      const s = this.view.session;
+      saveSession(s);
+      if (
+        !isLegacyReading(s.readingId) &&
+        queryClient.getQueryData(["consultation", s.readingId])
+      ) {
+        queryClient.setQueryData(
+          ["consultation", s.readingId],
+          structuredClone(s),
+        );
+      }
     } catch {
       this.update({ error: "이 브라우저에 상담 기록을 저장하지 못했어요." });
     }
@@ -216,19 +238,13 @@ export class Consultation {
       .catch(() => {})
       .then(async () => {
         if (this.stopped) return { error: "종료된 통화예요." };
-        const data = await readingRequest({
-          id: this.view.session.readingId,
-          action,
-          args,
-        });
+        const s = this.view.session;
+        const result = await consultationCommand(s, action, args);
         if (this.stopped) return { error: "종료된 통화예요." };
-        Object.assign(this.view.session, data.state);
-        if (!data.result.error && !data.result.unchanged)
-          recordFlow(this.view.session, action, args);
-        queryClient.setQueryData(["reading", data.id], data);
+        if (!result.error && !result.unchanged) recordFlow(s, action, args);
         this.persist();
         this.update();
-        return data.result;
+        return result;
       });
     this.queue = task;
     return task;
@@ -387,8 +403,8 @@ export class Consultation {
     if (!["idle", "error"].includes(this.view.phase) || this.view.session.ended)
       return;
     const s = this.view.session;
-    if (s.connected && s.endAt && s.endAt <= Date.now()) {
-      await this.end();
+    if (s.endAt && s.endAt <= Date.now()) {
+      await this.end("TIMEOUT");
       return;
     }
     this.stopped = false;
@@ -418,14 +434,17 @@ export class Consultation {
         return;
       }
       this.stream = stream;
-      const token = await request<{ value: string }>("/session", {
-        id: s.readingId,
-      });
+      const { client_secret: token } = await realtimeCredentials(
+        s.readingId,
+        !!s.connected,
+      );
       if (stale()) return;
       this.pc = new RTCPeerConnection();
       stream.getTracks().forEach((t) => this.pc!.addTrack(t, stream));
       this.speech = new SpeechPlayer(this.audio, {
         destination: this.audio.destination,
+        streamSegment: (text, responseId, index, signal) =>
+          streamSpeech(s.readingId, text, responseId, index, signal),
         onState: (busy: boolean) => {
           if (!this.stopped)
             this.update({
@@ -448,7 +467,6 @@ export class Consultation {
           this.update({ audioPlaying: true, status: "레나가 말하는 중" });
         },
       });
-      await this.speech.connect();
       if (stale()) return;
       this.dc = this.pc.createDataChannel("oai-events");
       this.dc.onmessage = (m) => {
@@ -473,7 +491,7 @@ export class Consultation {
         method: "POST",
         signal: AbortSignal.timeout(15000),
         headers: {
-          Authorization: `Bearer ${token.value}`,
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/sdp",
         },
         body: this.pc.localDescription!.sdp,
@@ -487,10 +505,7 @@ export class Consultation {
       await opened;
       clearTimeout(this.connectTimer);
       if (stale()) return;
-      if (!s.connected) {
-        s.endAt = Date.now() + 600000;
-        s.connected = true;
-      }
+      s.connected = true;
       this.restore();
       this.persist();
       this.startRecording(record);
@@ -582,7 +597,7 @@ export class Consultation {
         const sentence = this.realtimeSpeechBuffer.slice(0, end);
         this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(end);
         if (/[\p{L}\p{N}]/u.test(sentence)) {
-          this.speech?.append(sentence, true);
+          this.speech?.append(sentence, this.responseId);
         }
       }
     }
@@ -591,7 +606,7 @@ export class Consultation {
       s.transcript.push("레나: " + text);
       appendNote(s, "assistant", text, this.responseContext);
       if (/[\p{L}\p{N}]/u.test(this.realtimeSpeechBuffer))
-        this.speech?.append(this.realtimeSpeechBuffer, true);
+        this.speech?.append(this.realtimeSpeechBuffer, this.responseId);
       this.realtimeSpeechBuffer = "";
       this.persist();
     }
@@ -741,7 +756,7 @@ export class Consultation {
         (!this.responding && !this.speech?.busy) ||
         Date.now() - this.expiredAt >= 30000
       )
-        void this.end();
+        void this.end("TIMEOUT");
     }
   }
   private startRecording(enabled: boolean) {
@@ -783,7 +798,7 @@ export class Consultation {
       queen_line: "네 마음에 먼저 답해줘. 선택하는 건 너야.",
     };
   }
-  async end() {
+  async end(reason: "USER" | "TIMEOUT" = "USER") {
     if (["ending", "ended"].includes(this.view.phase)) return;
     this.update({ phase: "ending" });
     finishNotes(this.view.session);
@@ -793,12 +808,11 @@ export class Consultation {
       "오늘도 괜찮아, 공주야.",
       "오늘의 이야기를 정리하고 있어.",
     );
-    this.view.session.ended = true;
-    this.view.session.report = this.fallback();
-    this.persist();
+
     this.speech?.close();
     this.stream?.getTracks().forEach((t) => t.stop());
     clearInterval(this.timer);
+    await this.queue.catch(() => {});
     let result: Report | null = null;
     if (this.dc?.readyState === "open") {
       if (this.responding) this.send({ type: "response.cancel" });
@@ -828,27 +842,57 @@ export class Consultation {
     }
     this.stopTransport();
     const base = this.fallback();
-    this.view.session.report =
-      result &&
-      typeof result.summary === "string" &&
-      typeof result.queen_line === "string" &&
-      Array.isArray(result.readings)
-        ? {
-            ...base,
-            summary: result.summary,
-            queen_line: result.queen_line,
-            readings: result.readings.filter(
-              (r) =>
-                this.view.session.revealed.includes(r.slot) &&
-                typeof r.text === "string",
-            ),
-          }
-        : base;
+    this.view.session.report = {
+      ...base,
+      summary:
+        typeof result?.summary === "string" && result.summary.trim()
+          ? result.summary
+          : base.summary,
+      queen_line:
+        typeof result?.queen_line === "string" && result.queen_line.trim()
+          ? result.queen_line
+          : base.queen_line,
+      readings: base.readings.map((reading) => {
+        const text = Array.isArray(result?.readings)
+          ? result.readings.find((item) => item?.slot === reading.slot)?.text
+          : undefined;
+        return typeof text === "string" && text.trim()
+          ? { ...reading, text }
+          : reading;
+      }),
+    };
+    this.view.session.reportPending = true;
     this.persist();
-    this.update({
-      phase: "ended",
-      caption: this.view.session.report.queen_line,
-    });
+    await this.saveReport(reason);
+  }
+  async saveReport(
+    reason: "USER" | "TIMEOUT" = this.view.session.endAt &&
+    this.view.session.endAt <= Date.now()
+      ? "TIMEOUT"
+      : "USER",
+  ) {
+    if (this.savingReport || !this.view.session.report) return;
+    this.savingReport = true;
+    const s = this.view.session;
+    this.update({ error: "", busy: true });
+    try {
+      await finishConsultation(s.readingId, reason, s.report!);
+      void queryClient.invalidateQueries({ queryKey: reportsKey });
+      void queryClient.invalidateQueries({ queryKey: ["report", s.readingId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["consultation", s.readingId],
+      });
+      s.ended = true;
+      s.reportPending = false;
+      this.persist();
+      this.update({ phase: "ended", caption: s.report!.queen_line });
+    } catch (error) {
+      this.persist();
+      this.failMessage(error);
+    } finally {
+      this.savingReport = false;
+      this.update({ busy: false });
+    }
   }
   private stopTransport() {
     this.readingPlaybackSlot = 0;

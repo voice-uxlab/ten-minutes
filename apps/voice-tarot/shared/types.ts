@@ -74,6 +74,7 @@ export interface Session extends Reading {
   endAt?: number;
   connected?: boolean;
   report?: Report;
+  reportPending?: boolean;
   ended?: boolean;
 }
 export interface ReadingResult {
