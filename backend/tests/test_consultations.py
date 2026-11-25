@@ -468,7 +468,37 @@ def test_unhandled_error_response_hides_internal_exception_details():
     assert b"database-password" not in response.body
 
 
-def test_voice_connection_and_typecast_limits(authenticated_client, db_session, monkeypatch):
+def test_voice_connection_requires_pinned_prompt(authenticated_client, db_session, monkeypatch):
+    from unittest.mock import Mock
+
+    import httpx
+
+    from app.config import get_settings
+    from app.models import Consultation
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    for field in ("openai_api_key", "typecast_api_key", "typecast_voice_id"):
+        monkeypatch.setattr(settings, field, "test")
+    consultation = create_consultation(client)
+    upstream = Mock(side_effect=AssertionError("must not contact OpenAI"))
+    monkeypatch.setattr(httpx.Client, "post", upstream)
+
+    for prompt_id, prompt_version in (("", "5"), ("pmpt_test", ""), ("pmpt_test", "latest")):
+        monkeypatch.setattr(settings, "openai_realtime_prompt_id", prompt_id)
+        monkeypatch.setattr(settings, "openai_realtime_prompt_version", prompt_version)
+        response = client.request(
+            "POST", f"/api/v1/consultations/{consultation['id']}/realtime-connection",
+            json={"sdp": "v=0\r\noffer"},
+        )
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "REALTIME_PROMPT_NOT_CONFIGURED"
+
+    assert db_session.get(Consultation, consultation["id"]).voice_connection_attempts == 0
+    upstream.assert_not_called()
+
+
+def test_voice_connection_and_typecast_limits(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
     import json
 
     import httpx
@@ -521,7 +551,20 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     assert answer.status_code == 201 and answer.text == "v=0\r\nanswer"
     assert answer.headers["cache-control"] == "no-store"
     model_config = json.loads(calls[0][1]["files"]["session"][1])
-    assert model_config["output_modalities"] == ["text"] and model_config["tools"] == TOOLS
+    assert calls[0][0] == "https://api.openai.com/v1/realtime/calls"
+    assert calls[0][1]["files"]["sdp"] == (None, offer["sdp"], "application/sdp")
+    assert model_config == {
+        "type": "realtime",
+        "model": settings.openai_realtime_model,
+        "prompt": hosted_realtime_prompt,
+        "tools": TOOLS,
+        "tool_choice": "auto",
+        "output_modalities": ["text"],
+        "audio": {"input": {
+            "turn_detection": {"type": "semantic_vad", "eagerness": "medium"},
+            "transcription": {"model": "gpt-4o-mini-transcribe", "language": "ko"},
+        }},
+    }
 
     assert client.request("POST", connection, json=offer).status_code == 201
     assert calls[1][0].endswith("/rtc_test_1/hangup")
@@ -542,7 +585,7 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     assert client.request("POST", connection, json=offer).status_code == 409
 
 
-def test_replace_active_voice_only_connects_after_confirmed_hangup(authenticated_client, db_session, monkeypatch):
+def test_replace_active_voice_only_connects_after_confirmed_hangup(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
     from datetime import datetime, timedelta, timezone
     from unittest.mock import Mock
     import httpx
@@ -577,7 +620,7 @@ def test_replace_active_voice_only_connects_after_confirmed_hangup(authenticated
     assert connect(old).json()["error"]["code"] == "CONSULTATION_STATE_CONFLICT"
 
 
-def test_deadline_caps_heartbeat_and_rejects_reconnect_but_allows_hangup_retry(authenticated_client, db_session, monkeypatch):
+def test_deadline_caps_heartbeat_and_rejects_reconnect_but_allows_hangup_retry(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
     from datetime import datetime, timedelta, timezone
     from unittest.mock import Mock
 
@@ -699,7 +742,7 @@ def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_cli
         assert report["readings"] == body["readings"]
 
 
-def test_voice_heartbeat_and_cleanup_leave_live_calls_open(authenticated_client, db_session, monkeypatch):
+def test_voice_heartbeat_and_cleanup_leave_live_calls_open(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
     from datetime import datetime, timedelta, timezone
     from unittest.mock import Mock
 

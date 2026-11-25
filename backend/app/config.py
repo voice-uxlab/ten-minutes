@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     openai_api_key: Optional[str] = None
     openai_realtime_model: str = "gpt-realtime"
+    openai_realtime_prompt_id: str = ""
+    openai_realtime_prompt_version: str = ""
     typecast_api_key: Optional[str] = None
     typecast_voice_id: Optional[str] = None
     typecast_model: str = "ssfm-v30"

@@ -26,7 +26,6 @@ VOICE_IDLE_TIMEOUT = timedelta(minutes=2)
 
 OPENAI_CALLS = "https://api.openai.com/v1/realtime/calls"
 PROMPTS = Path(__file__).parent / "prompts"
-INSTRUCTIONS = (PROMPTS / "tarot_reader.md").read_text(encoding="utf-8")
 TOOLS = json.loads((PROMPTS / "realtime_tools.json").read_text(encoding="utf-8"))
 
 
@@ -125,6 +124,16 @@ def close_record(db: Session, call_id: str) -> None:
 def create_voice_connection(
     db: Session, consultation_id: str, user_id: str, offer: str, settings: Settings
 ) -> tuple[str, str]:
+    prompt_id = settings.openai_realtime_prompt_id.strip()
+    prompt_version = settings.openai_realtime_prompt_version.strip()
+    if not re.fullmatch(r"pmpt_[A-Za-z0-9]+", prompt_id) or not re.fullmatch(
+        r"[1-9][0-9]*", prompt_version
+    ):
+        raise APIError(
+            503, "REALTIME_PROMPT_NOT_CONFIGURED",
+            "Set a valid OPENAI_REALTIME_PROMPT_ID and OPENAI_REALTIME_PROMPT_VERSION.",
+        )
+
     reservation, prior_calls = reserve_connection(db, consultation_id, user_id, settings)
     try:
         with httpx.Client(timeout=10) as client:
@@ -141,8 +150,10 @@ def create_voice_connection(
                     "session": (None, json.dumps({
                         "type": "realtime",
                         "model": settings.openai_realtime_model,
-                        "instructions": INSTRUCTIONS,
+                        "prompt": {"id": prompt_id, "version": prompt_version},
+                        # Keep the tool contract aligned with the app's executor.
                         "tools": TOOLS,
+                        "tool_choice": "auto",
                         "output_modalities": ["text"],
                         "audio": {"input": {
                             "turn_detection": {"type": "semantic_vad", "eagerness": "medium"},
