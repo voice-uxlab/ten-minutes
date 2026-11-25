@@ -4,7 +4,7 @@
 
 ## 개발 환경
 
-홍비님의 `frontend-setup-proposal`을 기준으로 구현한 React 앱과 Node.js API는 [`apps/voice-tarot`](apps/voice-tarot/README.md)에 있습니다. Node.js 24 이상과 npm을 사용합니다.
+React 프론트엔드는 [`apps/voice-tarot`](apps/voice-tarot/README.md), FastAPI 서버는 [`backend`](backend/README.md)에 있습니다. 프론트엔드 개발에는 Node.js 24 이상과 npm을 사용합니다.
 
 - 인증 정보와 API 키는 서버 환경 변수로 관리합니다.
 - 개인용 `.env`, 상담 로그, 녹음 파일은 커밋하지 않습니다.
@@ -13,13 +13,15 @@
 
 ## 실행 방법
 
+[백엔드 실행 안내](backend/README.md)에 따라 FastAPI를 `8000` 포트에서 먼저 실행합니다.
+
 ```sh
 cd apps/voice-tarot
 npm ci
 npm run dev
 ```
 
-http://localhost:5173 — 프론트엔드와 로컬 API 서버가 함께 실행됩니다. API 키 없이 시범 통화를 사용할 수 있습니다. 실제 음성 상담과 OAuth 설정은 앱 README를 참고하세요.
+http://localhost:5173에서 Vite가 프론트엔드를 띄웁니다. 소셜 로그인과 음성 상담 요청은 FastAPI로 연결됩니다.
 
 ```sh
 npm run typecheck
@@ -28,7 +30,7 @@ npm test
 npm run build
 ```
 
-기존 JavaScript PoC는 비교용 보관본이며 `npm run poc`로 실행할 수 있습니다. 현재 실행 코드는 앱의 `src/`, `server/`, `shared/`에 있습니다.
+기존 JavaScript PoC는 비교용 보관본이며 `npm run poc`로 실행할 수 있습니다.
 
 ## 협업
 

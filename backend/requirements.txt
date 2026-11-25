@@ -1,5 +1,6 @@
 # Vercel/pip compatibility export. pyproject.toml and uv.lock are the source of truth.
 alembic==1.14.0
+anyio>=4,<5
 fastapi==0.115.6
 httpx==0.28.1
 pydantic-settings==2.7.1

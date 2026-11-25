@@ -1,5 +1,41 @@
 import { type ReactNode } from "react";
 
+const metallicIconSizes = {
+  "panel-mark": [18, 18],
+  "notice-mark": [18, 18],
+  headset: [20, 20],
+  "audio-lines": [20, 20],
+  menu: [22, 22],
+  close: [24, 24],
+  phone: [21, 22],
+  "report-file": [24, 24],
+  "chevron-right": [16, 16],
+  refresh: [18, 18],
+  flower: [18, 18],
+  mic: [24, 24],
+  "mic-off": [43, 43],
+  "end-call": [29.33, 29.33],
+  "wave-listening": [94, 30],
+  "wave-connecting": [131, 42],
+} as const;
+
+export function MetallicIcon({
+  name,
+}: {
+  name: keyof typeof metallicIconSizes;
+}) {
+  const [width, height] = metallicIconSizes[name];
+  return (
+    <img
+      className="metallic-icon"
+      src={`/assets/metallic/${name}.png`}
+      width={width}
+      height={height}
+      alt=""
+    />
+  );
+}
+
 export function BrandHeader({ children }: { children?: ReactNode }) {
   return (
     <header className="metallic-header">
@@ -19,23 +55,23 @@ export function BrandHeader({ children }: { children?: ReactNode }) {
 
 export function Panel({
   title,
+  icon = "panel-mark",
+  endIcon,
   children,
   className = "",
 }: {
   title: string;
+  icon?: "panel-mark" | "notice-mark" | "flower" | null;
+  endIcon?: "flower";
   children: ReactNode;
   className?: string;
 }) {
   return (
     <div className={"panel " + className}>
       <div className="panel-title">
-        <img
-          src="/assets/metallic/panel-mark.png"
-          width="20"
-          height="20"
-          alt=""
-        />
-        {title}
+        {icon && <MetallicIcon name={icon} />}
+        <span>{title}</span>
+        {endIcon && <MetallicIcon name={endIcon} />}
       </div>
       <div className="panel-body">{children}</div>
     </div>

@@ -29,7 +29,7 @@ VITE_AUTH_API_ORIGIN=https://ten-minutes-api-git-dev-voice-uxlab.vercel.app
 VITE_AUTH_CONSENT_VERSION=2026-11-v1
 ```
 
-`VITE_AUTH_API_ORIGIN`은 FastAPI 백엔드의 Preview origin입니다.
+`VITE_AUTH_API_ORIGIN`은 로그인과 상담 요청에 공통으로 사용하는 FastAPI 백엔드의 Preview origin입니다.
 
 `VITE_AUTH_CONSENT_VERSION`은 사용자가 동의한 AI 처리 안내 문구의 버전을 식별하기 위한 값입니다. 예를 들어 `2026-11-v1`, `2026-11-v2`와 같은 형식으로 관리합니다. 음성 전송, AI 답변 처리 등 관련 동의 문구가 변경되면 새로운 버전으로 변경해야 합니다.
 
@@ -152,3 +152,8 @@ PUBLIC_WEB_ORIGIN=https://ten-minutes-dev.vercel.app
 - [ ] 프론트엔드에서 로그인 및 회원 온보딩 확인
 - [ ] 동의 버전 저장 및 상담 생성 검증 확인
 - [ ] Preview Protection 상태에서 전체 흐름 확인
+
+
+## Realtime 종료 워커
+
+음성 연결을 활성화하기 전에 Alembic 마이그레이션을 적용하고, API와 같은 PostgreSQL 및 OpenAI 프로젝트 설정으로 `python -m app.voice_worker`를 상시 실행한다. Vercel의 FastAPI 요청 프로세스와 분리된 워커 실행 환경이 필요하다. 워커의 상태가 확인되기 전까지 API는 새 음성 연결을 거절한다.

@@ -3,11 +3,6 @@ import { motion, useReducedMotion } from "motion/react";
 import type { Card } from "@/api/types";
 import { cardImage } from "./card-image";
 type DisplayCard = Pick<Card, "number" | "slot" | "position"> & Partial<Card>;
-const titles: Record<number, { roman: string; english: string }> = {
-  14: { roman: "XIV", english: "TEMPERANCE" },
-  17: { roman: "XVII", english: "THE STAR" },
-  19: { roman: "XIX", english: "THE SUN" },
-};
 const cardBack = "/assets/metallic/metallic-card-back.png";
 const TarotCard = memo(function TarotCard({
   card,
@@ -21,35 +16,29 @@ const TarotCard = memo(function TarotCard({
   hidden: boolean;
 }) {
   const reduced = useReducedMotion();
-  const image = cardImage(card.id);
-  const title = card.id === undefined ? undefined : titles[card.id];
+  const image = open ? cardImage(card.id) : cardBack;
   return (
     <div className={"card-wrap" + (active ? " active" : "")} hidden={hidden}>
       <motion.div
-        className={
-          "card" + (open ? (card.reversed ? " reversed" : "") : " back")
-        }
+        className="tarot-card-face"
         initial={false}
         animate={{ rotateY: open ? 0 : 180 }}
         transition={{ duration: reduced ? 0 : 0.35 }}
       >
-        {open ? (
-          <>
-            <span className="arcana">{title?.roman ?? "TAROT"}</span>
-            {image ? (
-              <img className="symbol" src={image} alt={card.name} />
-            ) : (
-              <span className="symbol">✦</span>
-            )}
-            <span className="english">{title?.english ?? card.position}</span>
-            <b>{card.name}</b>
-          </>
-        ) : (
+        {image ? (
           <img
-            style={{ transform: "rotateY(180deg)" }}
-            src={cardBack}
-            alt="아직 공개하지 않은 타로 카드"
+            className={
+              open
+                ? card.reversed
+                  ? "tarot-card-reversed"
+                  : undefined
+                : "tarot-card-back"
+            }
+            src={image}
+            alt={open ? card.name : "아직 공개하지 않은 타로 카드"}
           />
+        ) : (
+          <span>{card.name}</span>
         )}
       </motion.div>
       <span>

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -79,6 +80,7 @@ class OAuthAttempt(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
     provider: Mapped[str] = mapped_column(String(16))
     state_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    browser_binding_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -122,6 +124,15 @@ class Consultation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     end_reason: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    voice_connection_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    voice_reservation: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    voice_reservation_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    tts_characters: Mapped[int] = mapped_column(Integer, default=0)
+    tts_leases: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+
+    @property
+    def call_ends_at(self) -> datetime:
+        return ensure_utc(self.created_at) + timedelta(minutes=10)
 
     cards: Mapped[list["ConsultationCard"]] = relationship(
         back_populates="consultation", cascade="all, delete-orphan", order_by="ConsultationCard.slot"
@@ -129,6 +140,31 @@ class Consultation(Base):
     report: Mapped[Optional["ConsultationReport"]] = relationship(
         back_populates="consultation", cascade="all, delete-orphan", uselist=False
     )
+
+
+class RealtimeCall(Base):
+    __tablename__ = "realtime_calls"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    consultation_id: Mapped[str] = mapped_column(ForeignKey("consultation_sessions.id"), index=True)
+    hangup_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VoiceAccountUsage(Base):
+    __tablename__ = "voice_account_usage"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    utc_day: Mapped[date] = mapped_column(Date, primary_key=True)
+    connection_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    tts_characters: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class VoiceWorkerHeartbeat(Base):
+    __tablename__ = "voice_worker_heartbeat"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ConsultationCard(Base):
