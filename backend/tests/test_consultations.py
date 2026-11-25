@@ -523,9 +523,6 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     model_config = json.loads(calls[0][1]["files"]["session"][1])
     assert model_config["output_modalities"] == ["text"] and model_config["tools"] == TOOLS
 
-    second = client.request("POST", "/api/v1/consultations", json={"consent_version": "2026-11"}).json()
-    second_path = f"/api/v1/consultations/{second['id']}"
-    assert client.request("POST", f"{second_path}/realtime-connection", json=offer).status_code == 409
     assert client.request("POST", connection, json=offer).status_code == 201
     assert calls[1][0].endswith("/rtc_test_1/hangup")
     assert client.get(path).json()["call_ends_at"] == consultation["call_ends_at"]
@@ -543,6 +540,41 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     db_session.expire_all()
     assert db_session.get(RealtimeCall, "rtc_test_3").closed_at is not None
     assert client.request("POST", connection, json=offer).status_code == 409
+
+
+def test_replace_active_voice_only_connects_after_confirmed_hangup(authenticated_client, db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+    import httpx
+    from app.config import get_settings
+    from app.models import Consultation, RealtimeCall
+
+    client, _ = authenticated_client
+    for field in ("openai_api_key", "typecast_api_key", "typecast_voice_id"):
+        monkeypatch.setattr(get_settings(), field, "test")
+    old, new = [create_consultation(client)["id"] for _ in range(2)]
+    def connect(cid):
+        return client.request("POST", f"/api/v1/consultations/{cid}/realtime-connection",
+                              json={"sdp": "v=0\r\noffer"})
+    def answer(cid):
+        return httpx.Response(201, text="v=0\r\nanswer", headers={"Location": f"/v1/realtime/calls/{cid}"})
+    provider = Mock(side_effect=[answer("rtc_old"), httpx.Response(502), httpx.Response(410), answer("rtc_new")])
+    monkeypatch.setattr(httpx.Client, "post", provider)
+    assert connect(old).status_code == 201
+    previous = db_session.get(Consultation, old)
+    previous.voice_reservation_until = datetime.now(timezone.utc) + timedelta(seconds=20)
+    db_session.commit()
+    assert connect(new).json()["error"]["code"] == "VOICE_CONNECTION_PENDING"
+    assert provider.call_count == 1
+    previous.voice_reservation_until = None
+    db_session.commit()
+    assert connect(new).json()["error"]["code"] == "REALTIME_HANGUP_FAILED"
+    assert db_session.get(RealtimeCall, "rtc_old").closed_at is None
+    assert connect(new).status_code == 201
+    assert [c.args[0].split("/calls")[-1] for c in provider.call_args_list] == ["", "/rtc_old/hangup", "/rtc_old/hangup", ""]
+    assert db_session.get(RealtimeCall, "rtc_old").closed_at is not None
+    assert db_session.get(RealtimeCall, "rtc_new").closed_at is None
+    assert connect(old).json()["error"]["code"] == "CONSULTATION_STATE_CONFLICT"
 
 
 def test_deadline_caps_heartbeat_and_rejects_reconnect_but_allows_hangup_retry(authenticated_client, db_session, monkeypatch):

@@ -69,30 +69,38 @@ def reserve_connection(
     consultation = lock_consultation(db, consultation_id, user_id)
     now = datetime.now(timezone.utc)
     active_consultation(consultation)
-    if consultation.voice_reservation_until and ensure_utc(consultation.voice_reservation_until) > now:
+    pending = db.scalar(select(Consultation.id).where(
+        Consultation.user_id == user_id, Consultation.voice_reservation_until > now,
+    ).limit(1))
+    if pending:
         raise APIError(409, "VOICE_CONNECTION_PENDING", "A voice connection is already being created.")
-    active_id = db.scalar(
-        select(Consultation.id)
-        .where(
-            Consultation.user_id == user_id,
-            Consultation.id != consultation_id,
-            (Consultation.voice_reservation_until > now)
-            | select(RealtimeCall.id).where(
-                RealtimeCall.consultation_id == Consultation.id,
-                RealtimeCall.closed_at.is_(None),
-            ).exists(),
-        )
-        .limit(1)
-    )
-    if active_id:
-        raise APIError(409, "VOICE_ALREADY_ACTIVE", "Another voice call is still active for this account.")
     usage = locked_daily_usage(db, user_id, now)
     if (consultation.voice_connection_attempts >= settings.voice_connections_per_consultation
             or usage.connection_attempts >= settings.voice_connections_per_account_day):
         raise APIError(429, "VOICE_CONNECTION_LIMIT", "The voice connection limit has been reached.")
-    prior = list(db.scalars(select(RealtimeCall.id).where(
-        RealtimeCall.consultation_id == consultation_id, RealtimeCall.closed_at.is_(None)
-    )))
+    # Lock the consultations before their calls, in the same order as heartbeat and /end.
+    open_call = select(RealtimeCall.id).where(
+        RealtimeCall.consultation_id == Consultation.id, RealtimeCall.closed_at.is_(None),
+    ).exists()
+    previous = db.scalars(select(Consultation).where(
+        Consultation.user_id == user_id, Consultation.id != consultation_id,
+        open_call | Consultation.voice_reservation.is_not(None),
+    ).order_by(Consultation.id).with_for_update()).all()
+    for old in previous:
+        old.voice_reservation = None
+        old.voice_reservation_until = None
+        if old.ended_at is None:
+            old.status = "ENDED"
+            old.ended_at = now
+            old.end_reason = "USER"
+    calls = db.scalars(select(RealtimeCall).where(
+        RealtimeCall.consultation_id.in_([consultation_id, *(old.id for old in previous)]),
+        RealtimeCall.closed_at.is_(None),
+    ).order_by(RealtimeCall.id).with_for_update()).all()
+    prior = []
+    for call in calls:
+        call.hangup_at = now
+        prior.append(call.id)
     reservation = uuid_string()
     usage.connection_attempts += 1
     consultation.voice_connection_attempts += 1
@@ -155,6 +163,7 @@ def create_voice_connection(
                 now = datetime.now(timezone.utc)
                 accepted = (
                     consultation.voice_reservation == reservation
+                    and ensure_utc(consultation.voice_reservation_until) > now
                     and consultation.status not in {"ENDED", "ENDING", "FAILED"}
                     and consultation.call_ends_at > now
                     and response.text.startswith("v=0")
