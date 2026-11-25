@@ -170,7 +170,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
     question: null,
     spread_type: null,
     created_at: new Date(now).toISOString(),
-    call_ends_at: new Date(now + 600000).toISOString(),
+    call_ends_at: null,
     cards: [],
   };
   vi.mocked(fetch).mockImplementation(async (path, options) => {
@@ -286,7 +286,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   );
   await user.click(await screen.findByRole("button", { name: "허용하기" }));
   await user.click(screen.getByLabelText("상담을 위한 음성 처리에 동의해요."));
-  await user.click(screen.getByRole("button", { name: /10분 상담 시작하기/ }));
+  await user.click(screen.getByRole("button", { name: /상담 시작하기/ }));
   await user.click(
     await screen.findByRole("button", { name: /그 사람도 나를 좋아할까/ }),
   );
@@ -298,7 +298,6 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(2);
   const reading = loadSession(consultationId)!;
   expect(reading.demo).toBe(false);
-  expect(reading.endAt! - Date.now()).toBeGreaterThan(590000);
   expect(vi.mocked(fetch).mock.calls.map(([path]) => path)).not.toContain(
     "/test-logs",
   );

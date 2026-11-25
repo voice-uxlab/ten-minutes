@@ -29,7 +29,6 @@ interface ConsultationResponse {
   spread_type: string | null;
   status: string;
   created_at: string;
-  call_ends_at: string | null;
   cards: ApiCard[];
   report_status: string | null;
 }
@@ -97,7 +96,6 @@ function sessionFromApi(data: ConsultationResponse, local?: Session): Session {
     readingId: data.id,
     date: data.created_at,
     connected: data.status !== "CREATED",
-    endAt: data.call_ends_at ? Date.parse(data.call_ends_at) : undefined,
     ended: data.status === "ENDED" || data.status === "FAILED",
     reportPending: !!local?.reportPending && !data.report_status,
     demo: false,
@@ -217,12 +215,8 @@ export function streamSpeech(
   );
 }
 
-export async function finishConsultation(
-  id: string,
-  reason: "USER" | "TIMEOUT",
-  report: Report,
-) {
-  await fastApiJson(`${path(id)}/end`, "POST", { reason });
+export async function finishConsultation(id: string, report: Report) {
+  await fastApiJson(`${path(id)}/end`, "POST", { reason: "USER" });
   await fastApiJson(`${path(id)}/report`, "PUT", {
     situation_summary: report.summary.trim().slice(0, 500),
     queen_line: report.queen_line.trim().slice(0, 300),

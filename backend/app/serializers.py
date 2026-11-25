@@ -1,6 +1,6 @@
 from typing import Optional
 
-from .config import Settings, get_settings
+from .config import Settings
 from .models import Consultation, ConsultationCard, User, ensure_utc
 
 
@@ -75,7 +75,7 @@ def consultation_response(consultation: Consultation) -> dict:
         "report_status": consultation.report.status if consultation.report else None,
         "created_at": ensure_utc(consultation.created_at),
         "ended_at": ensure_utc(consultation.ended_at),
-        "call_ends_at": consultation.call_ends_at if get_settings().voice_deadline_enabled else None,
+        "call_ends_at": None,
     }
 
 

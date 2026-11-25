@@ -470,12 +470,11 @@ def test_unhandled_error_response_hides_internal_exception_details():
 
 def test_voice_connection_and_typecast_limits(authenticated_client, db_session, monkeypatch):
     import json
-    from datetime import datetime, timedelta, timezone
 
     import httpx
 
     from app.config import get_settings
-    from app.models import Consultation, RealtimeCall
+    from app.models import RealtimeCall
     from app.voice import TOOLS
 
     client, _ = authenticated_client
@@ -485,8 +484,8 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
         "typecast_api_key": "test-typecast-key",
         "typecast_voice_id": "test-voice",
         "typecast_model": "ssfm-v30",
-        "voice_connections_per_consultation": 3,
-        "voice_connections_per_account_day": 3,
+        "voice_connections_per_consultation": 2,
+        "voice_connections_per_account_day": 2,
         "tts_characters_per_consultation": 10,
         "tts_characters_per_account_day": 12,
         "tts_parallel_requests": 1,
@@ -494,13 +493,7 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
         monkeypatch.setattr(settings, field, value)
     calls = []
     tts = []
-    scheduled = []
-
-    def schedule(settings, consultation_id, deadline, *, early=False):
-        scheduled.append((consultation_id, deadline, early))
-
     def provider_response(self, url, **kwargs):
-        assert scheduled
         calls.append((url, kwargs))
         if url.endswith("/hangup"):
             return httpx.Response(200)
@@ -521,11 +514,8 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     offer = {"sdp": "v=0\r\noffer"}
     connection = f"{path}/realtime-connection"
     speech = {"text": "첫 인사", "response_id": "resp_test", "segment_index": 0}
-    assert client.request("POST", connection, json=offer).status_code == 503
     assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 409
     assert calls == []
-    monkeypatch.setattr("app.voice.schedule_voice_hangup", schedule)
-    monkeypatch.setattr("app.api.schedule_voice_hangup", schedule)
 
     answer = client.request("POST", connection, json=offer)
     assert answer.status_code == 201 and answer.text == "v=0\r\nanswer"
@@ -538,7 +528,6 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     assert client.request("POST", f"{second_path}/realtime-connection", json=offer).status_code == 409
     assert client.request("POST", connection, json=offer).status_code == 201
     assert calls[1][0].endswith("/rtc_test_1/hangup")
-    assert scheduled == [(consultation["id"], datetime.fromisoformat(consultation["call_ends_at"].replace("Z", "+00:00")), False)] * 2
     assert client.get(path).json()["call_ends_at"] == consultation["call_ends_at"]
     assert client.request("POST", connection, json=offer).status_code == 429
 
@@ -551,18 +540,12 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
 
     ended = client.request("POST", f"{path}/end", json={"reason": "USER"})
     assert ended.status_code == 200
-    assert scheduled[-1][0] == consultation["id"] and scheduled[-1][2] is True
     db_session.expire_all()
-    assert db_session.get(RealtimeCall, "rtc_test_3").hangup_at <= datetime.now(timezone.utc).replace(tzinfo=None)
+    assert db_session.get(RealtimeCall, "rtc_test_3").closed_at is not None
     assert client.request("POST", connection, json=offer).status_code == 409
 
-    stored = db_session.get(Consultation, second["id"])
-    stored.created_at = datetime.now(timezone.utc) - timedelta(minutes=11)
-    db_session.commit()
-    assert client.request("POST", f"{second_path}/realtime-connection", json=offer).json()["error"]["code"] == "CONSULTATION_EXPIRED"
 
-
-def test_local_consultation_without_deadline_still_hangs_up_manually(authenticated_client, db_session, monkeypatch):
+def test_deployed_consultation_without_deadline_retries_manual_hangup(authenticated_client, db_session, monkeypatch):
     from datetime import datetime, timedelta, timezone
     from unittest.mock import Mock
 
@@ -573,20 +556,18 @@ def test_local_consultation_without_deadline_still_hangs_up_manually(authenticat
 
     client, _ = authenticated_client
     settings = get_settings()
-    monkeypatch.setattr(settings, "app_env", "local")
-    monkeypatch.setattr(settings, "local_disable_voice_deadline", True)
+    monkeypatch.setattr(settings, "app_env", "preview")
+    monkeypatch.setattr(settings, "backend_origin", "https://preview.example.com")
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(settings, "typecast_api_key", "test-key")
     monkeypatch.setattr(settings, "typecast_voice_id", "test-voice")
-    schedule = Mock()
-    monkeypatch.setattr("app.voice.schedule_voice_hangup", schedule)
-    monkeypatch.setattr("app.api.schedule_voice_hangup", schedule)
     provider = Mock(side_effect=[
         httpx.Response(
             201,
             text="v=0\r\nanswer",
             headers={"Location": "/v1/realtime/calls/rtc_local"},
         ),
+        httpx.Response(502),
         httpx.Response(200),
     ])
     monkeypatch.setattr(httpx.Client, "post", provider)
@@ -600,16 +581,13 @@ def test_local_consultation_without_deadline_still_hangs_up_manually(authenticat
     db_session.commit()
     path = f"/api/v1/consultations/{stored.id}"
     assert client.request("POST", f"{path}/realtime-connection", json={"sdp": "v=0\r\noffer"}).status_code == 201
+    assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 503
+    assert db_session.get(RealtimeCall, "rtc_local").closed_at is None
     assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 200
+    assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 200
+    assert provider.call_count == 3
     assert db_session.get(RealtimeCall, "rtc_local").closed_at is not None
     assert provider.call_args.args[0].endswith("/rtc_local/hangup")
-    schedule.assert_not_called()
-
-    monkeypatch.setattr(settings, "app_env", "preview")
-    assert client.get(path).json()["call_ends_at"] is not None
-    monkeypatch.setattr(settings, "app_env", "local")
-    monkeypatch.setattr(settings, "backend_origin", "https://preview.example.com")
-    assert client.get(path).json()["call_ends_at"] is not None
 
 
 def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch):
@@ -677,57 +655,3 @@ def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_cli
         report = client.get(f"{path}/report").json()
         assert [card["slot"] for card in report["cards"]] == revealed_slots
         assert report["readings"] == body["readings"]
-
-
-def test_scheduled_hangup_authenticates_retries_and_marks_timeout(authenticated_client, db_session, monkeypatch):
-    from datetime import datetime, timedelta, timezone
-    from unittest.mock import Mock
-
-    from app.config import get_settings
-    from app.models import Consultation, RealtimeCall
-    from app.voice_tasks import HANGUP_PATH
-
-    client, _ = authenticated_client
-    settings = get_settings()
-    invoker = "hangup@example.iam.gserviceaccount.com"
-    monkeypatch.setattr(settings, "voice_tasks_invoker_email", invoker)
-    monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    verify = Mock(return_value={"email": "different@example.com", "email_verified": True})
-    monkeypatch.setattr("app.voice_tasks.id_token.verify_oauth2_token", verify)
-    consultation = create_consultation(client)
-    stored = db_session.get(Consultation, consultation["id"])
-    hangup = Mock(side_effect=[False, True])
-    monkeypatch.setattr("app.voice.hangup", hangup)
-
-    payload = {"consultation_id": stored.id}
-    headers = {"Authorization": "Bearer test-token"}
-    assert client.post(HANGUP_PATH, json=payload).status_code == 401
-    assert client.post(HANGUP_PATH, json=payload, headers=headers).status_code == 401
-    assert not hangup.called
-    assert verify.call_args.kwargs["audience"] == settings.backend_origin.rstrip("/") + HANGUP_PATH
-
-    verify.return_value = {"email": invoker, "email_verified": True}
-    assert client.post(HANGUP_PATH, json=payload, headers=headers).status_code == 503
-    assert not hangup.called
-
-    now = datetime.now(timezone.utc)
-    stored.created_at = now - timedelta(minutes=11)
-    stored.status = "ACTIVE"
-    stored.voice_reservation_until = now + timedelta(seconds=30)
-    db_session.commit()
-    assert client.post(HANGUP_PATH, json=payload, headers=headers).json()["error"]["code"] == "VOICE_HANGUP_PENDING_CONNECTION"
-
-    stored.voice_reservation_until = None
-    call = RealtimeCall(id="rtc_timeout", consultation_id=stored.id, hangup_at=stored.call_ends_at)
-    db_session.add(call)
-    db_session.commit()
-    assert client.post(HANGUP_PATH, json=payload, headers=headers).status_code == 503
-    db_session.expire_all()
-    assert call.closed_at is None and stored.status == "ENDED"
-    assert stored.end_reason == "TIMEOUT" and stored.ended_at == stored.call_ends_at.replace(tzinfo=None)
-
-    assert client.post(HANGUP_PATH, json=payload, headers=headers).status_code == 204
-    assert client.post(HANGUP_PATH, json=payload, headers=headers).status_code == 204
-    db_session.expire_all()
-    assert call.closed_at is not None
-    assert hangup.call_count == 2

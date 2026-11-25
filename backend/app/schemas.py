@@ -151,7 +151,7 @@ class ConsultationResponse(StrictModel):
     report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report exists")
     created_at: datetime = Field(description="Consultation creation timestamp")
     ended_at: Optional[datetime] = Field(description="Consultation end timestamp, or null while active")
-    call_ends_at: Optional[datetime] = Field(description="Server call deadline, null when disabled for local testing")
+    call_ends_at: Optional[datetime] = Field(description="Legacy field, always null")
 
 
 class ConsultationListItem(StrictModel):
@@ -330,10 +330,6 @@ class RealtimeConnectionRequest(StrictModel):
         if not value.startswith(("v=0\r\n", "v=0\n")):
             raise ValueError("invalid SDP offer")
         return value
-
-
-class VoiceHangupTask(StrictModel):
-    consultation_id: UUID
 
 
 class TTSRequest(StrictModel):

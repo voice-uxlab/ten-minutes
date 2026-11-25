@@ -18,11 +18,6 @@ uv run uvicorn app.main:app --reload --port 8000
 - OpenAPI UI: `http://localhost:8000/docs`
 - 테스트: `uv run pytest`
 
-Cloud Tasks 없이 시간을 제한하지 않는 로컬 상담을 테스트하려면 백엔드를 실행할 때
-`APP_ENV=local`과 `LOCAL_DISABLE_VOICE_DEADLINE=true`를 설정하세요. 이 모드에서는
-종료 버튼으로 통화를 닫습니다. 브라우저가 갑자기 닫히면 서버가 10분에 연결을
-정리하지 않습니다.
-
 ## API 문서 사용법
 
 서버 실행 후 `http://localhost:8000/docs`에서 API별 요청 파라미터, 응답 필드와 상태 코드
@@ -100,20 +95,17 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 - 상담 생성/목록/조회/종료
 - 78장 서버 덱, 4개 스프레드, 중복 없는 3장 확정, 카드 순차 공개
 - FastAPI가 생성·종료하는 OpenAI Realtime WebRTC 연결과 상담 도구, Typecast 1.3배 WAV 스트리밍 프록시
-- 상담 생성 시각 기준 10분 제한과 같은 상담으로 재연결
+- 같은 상담으로 재연결
 - 상담 이벤트, 공개된 카드 기준으로 조기 종료 리포트 저장/조회
 - 후킹 문구 기반 공유 링크 생성과 공유 미리보기 조회
 
 공개 공유 API는 질문, 카드, 카드별 해석, 상황 요약, “언니”의 한마디를 반환하지 않습니다. 개인 리포트 전문은 인증된 상담 소유자만 조회할 수 있습니다.
 
 
-### 음성 종료 예약
+### 음성 종료
 
-상담 생성 시각 기준 10분 시점에 Google Cloud Tasks가 FastAPI의 내부 종료 API를 호출합니다.
-FastAPI는 종료 예약이 확인된 뒤 OpenAI 연결을 열고, 사용자가 먼저 종료하면 즉시 실행할
-작업도 등록합니다. 콜백은 Google이 발급한 ID 토큰과 설정된 서비스 계정을 확인합니다.
-OpenAI 종료에 실패하면 콜백이 `503`을 반환하여 Cloud Tasks가 재시도합니다.
-
-예약 큐와 백엔드 환경변수는 [배포 문서](../docs/deployment.md#realtime-종료-예약)를 참고합니다.
+사용자가 종료 버튼을 누르면 FastAPI가 OpenAI Realtime 연결에 종료 요청을 보냅니다.
+실패 시 같은 종료 요청을 다시 보낼 수 있습니다. 시간이 지났거나 브라우저가 갑자기
+닫혔을 때 실행되는 예약 종료는 없습니다.
 
 기본 한도는 계정당 동시 통화 1개, 상담당 연결 시도 4회, 계정당 하루 연결 시도 20회, 상담당 TTS 12,000자, 계정당 하루 TTS 60,000자, 상담당 동시 TTS 요청 4개다. 환경변수 `VOICE_CONNECTIONS_PER_CONSULTATION`, `VOICE_CONNECTIONS_PER_ACCOUNT_DAY`, `TTS_CHARACTERS_PER_CONSULTATION`, `TTS_CHARACTERS_PER_ACCOUNT_DAY`, `TTS_PARALLEL_REQUESTS`로 조정할 수 있다.
