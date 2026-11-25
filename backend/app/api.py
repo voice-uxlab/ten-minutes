@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -50,6 +51,7 @@ from .schemas import (
     ShareLinkResponse,
     TTSRequest,
     UpdateCurrentUserRequest,
+    VoiceHangupTask,
 )
 from .serializers import (
     card_response,
@@ -59,7 +61,16 @@ from .serializers import (
     user_response,
 )
 
-from .voice import active_consultation, create_voice_connection, release_tts, reserve_tts
+from .voice import (
+    active_consultation,
+    close_scheduled_consultation,
+    create_voice_connection,
+    release_tts,
+    reserve_tts,
+)
+from .voice_tasks import HANGUP_PATH, authenticate_voice_task, schedule_voice_hangup
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1", responses=AUTHENTICATED_RESPONSES)
@@ -395,6 +406,7 @@ def end_consultation(
     consultation_id: UUID = PathParameter(description="Consultation ID to end"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
+    settings: Settings = Depends(get_settings),
 ):
     consultation = owned_consultation(db, consultation_id, user, lock=True)
     if consultation.status != "ENDED":
@@ -406,8 +418,37 @@ def end_consultation(
             RealtimeCall.closed_at.is_(None),
             RealtimeCall.hangup_at > consultation.ended_at,
         ).values(hangup_at=consultation.ended_at))
-        db.commit()
-    return consultation_response(consultation)
+    result = consultation_response(consultation)
+    needs_hangup = bool(consultation.voice_reservation) or db.scalar(
+        select(RealtimeCall.id).where(
+            RealtimeCall.consultation_id == consultation.id, RealtimeCall.closed_at.is_(None)
+        ).limit(1)
+    )
+    db.commit()
+    if needs_hangup:
+        try:
+            schedule_voice_hangup(settings, str(consultation_id), datetime.now(timezone.utc), early=True)
+        except APIError:
+            # The original deadline task remains queued.
+            logger.warning("Could not schedule an early Realtime hangup")
+    return result
+
+
+@router.post(
+    HANGUP_PATH.removeprefix("/api/v1"),
+    status_code=204,
+    include_in_schema=False,
+    dependencies=[Depends(authenticate_voice_task)],
+)
+def run_voice_hangup(
+    body: VoiceHangupTask,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    if not settings.openai_api_key:
+        raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
+    close_scheduled_consultation(db, str(body.consultation_id), settings.openai_api_key)
+    return Response(status_code=204)
 
 
 @router.put(

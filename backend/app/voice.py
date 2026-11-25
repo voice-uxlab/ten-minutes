@@ -15,10 +15,10 @@ from .models import (
     RealtimeCall,
     User,
     VoiceAccountUsage,
-    VoiceWorkerHeartbeat,
     ensure_utc,
     uuid_string,
 )
+from .voice_tasks import schedule_voice_hangup
 
 OPENAI_CALLS = "https://api.openai.com/v1/realtime/calls"
 PROMPTS = Path(__file__).parent / "prompts"
@@ -60,14 +60,11 @@ def locked_daily_usage(db: Session, user_id: str, now: datetime) -> VoiceAccount
 
 def reserve_connection(
     db: Session, consultation_id: str, user_id: str, settings: Settings
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str], datetime]:
     lock_account(db, user_id)
     consultation = lock_consultation(db, consultation_id, user_id)
     now = datetime.now(timezone.utc)
     active_consultation(consultation, now)
-    heartbeat = db.scalar(select(VoiceWorkerHeartbeat.seen_at).where(VoiceWorkerHeartbeat.id == 1))
-    if heartbeat is None or ensure_utc(heartbeat) <= now - timedelta(seconds=20):
-        raise APIError(503, "VOICE_WORKER_UNAVAILABLE", "The voice termination worker is unavailable.")
     if consultation.voice_reservation_until and ensure_utc(consultation.voice_reservation_until) > now:
         raise APIError(409, "VOICE_CONNECTION_PENDING", "A voice connection is already being created.")
     active_id = db.scalar(
@@ -96,9 +93,11 @@ def reserve_connection(
     usage.connection_attempts += 1
     consultation.voice_connection_attempts += 1
     consultation.voice_reservation = reservation
-    consultation.voice_reservation_until = min(consultation.call_ends_at, now + timedelta(seconds=60))
+    # Keep the lease visible if the deadline passes during the upstream handshake.
+    consultation.voice_reservation_until = now + timedelta(seconds=60)
+    deadline = consultation.call_ends_at
     db.commit()
-    return reservation, prior
+    return reservation, prior, deadline
 
 
 def hangup(client: httpx.Client, call_id: str, api_key: str) -> bool:
@@ -116,8 +115,11 @@ def close_record(db: Session, call_id: str) -> None:
 def create_voice_connection(
     db: Session, consultation_id: str, user_id: str, offer: str, settings: Settings
 ) -> str:
-    reservation, prior_calls = reserve_connection(db, consultation_id, user_id, settings)
+    reservation, prior_calls, deadline = reserve_connection(db, consultation_id, user_id, settings)
     try:
+        schedule_voice_hangup(settings, consultation_id, deadline)
+        if datetime.now(timezone.utc) >= deadline:
+            raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
         with httpx.Client(timeout=10) as client:
             for prior in prior_calls:
                 if not hangup(client, prior, settings.openai_api_key):
@@ -183,6 +185,37 @@ def create_voice_connection(
             consultation.voice_reservation = None
             consultation.voice_reservation_until = None
             db.commit()
+
+
+def close_scheduled_consultation(db: Session, consultation_id: str, api_key: str) -> None:
+    consultation = db.scalar(
+        select(Consultation).where(Consultation.id == consultation_id).with_for_update()
+    )
+    if consultation is None:
+        return
+    now = datetime.now(timezone.utc)
+    if consultation.ended_at is None:
+        if consultation.call_ends_at > now:
+            raise APIError(503, "VOICE_HANGUP_NOT_DUE", "The voice hangup is not yet due.")
+        consultation.status = "ENDED"
+        consultation.ended_at = consultation.call_ends_at
+        consultation.end_reason = "TIMEOUT"
+
+    pending = consultation.voice_reservation_until
+    call_ids = list(db.scalars(select(RealtimeCall.id).where(
+        RealtimeCall.consultation_id == consultation_id, RealtimeCall.closed_at.is_(None),
+    )))
+    db.commit()
+    try:
+        with httpx.Client(timeout=5) as client:
+            for call_id in call_ids:
+                if not hangup(client, call_id, api_key):
+                    raise APIError(503, "VOICE_HANGUP_RETRY", "Could not close the Realtime call.")
+                close_record(db, call_id)
+    except httpx.RequestError as exc:
+        raise APIError(503, "VOICE_HANGUP_RETRY", "Could not close the Realtime call.") from exc
+    if pending and ensure_utc(pending) > now:
+        raise APIError(503, "VOICE_HANGUP_PENDING_CONNECTION", "A voice connection is still being created.")
 
 
 def reserve_tts(

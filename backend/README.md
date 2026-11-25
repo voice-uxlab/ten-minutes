@@ -102,14 +102,13 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 공개 공유 API는 질문, 카드, 카드별 해석, 상황 요약, “언니”의 한마디를 반환하지 않습니다. 개인 리포트 전문은 인증된 상담 소유자만 조회할 수 있습니다.
 
 
-### 음성 종료 워커
+### 음성 종료 예약
 
-마이그레이션 `20261125_0007`을 적용한 다음 FastAPI와 같은 `DATABASE_URL` 및 `OPENAI_API_KEY`를 사용하는 별도 상시 프로세스를 실행한다.
+상담 생성 시각 기준 10분 시점에 Google Cloud Tasks가 FastAPI의 내부 종료 API를 호출합니다.
+FastAPI는 종료 예약이 확인된 뒤 OpenAI 연결을 열고, 사용자가 먼저 종료하면 즉시 실행할
+작업도 등록합니다. 콜백은 Google이 발급한 ID 토큰과 설정된 서비스 계정을 확인합니다.
+OpenAI 종료에 실패하면 콜백이 `503`을 반환하여 Cloud Tasks가 재시도합니다.
 
-```sh
-python -m app.voice_worker
-```
-
-API가 워커의 최근 heartbeat를 확인한 뒤 새 통화를 허용한다. 워커가 중단되면 새 연결은 잠시 거절되고, 다시 실행하면 DB에 남은 종료 작업을 재시도한다. 운영에서 API와 함께 워커를 모니터링해야 한다.
+예약 큐와 백엔드 환경변수는 [배포 문서](../docs/deployment.md#realtime-종료-예약)를 참고합니다.
 
 기본 한도는 계정당 동시 통화 1개, 상담당 연결 시도 4회, 계정당 하루 연결 시도 20회, 상담당 TTS 12,000자, 계정당 하루 TTS 60,000자, 상담당 동시 TTS 요청 4개다. 환경변수 `VOICE_CONNECTIONS_PER_CONSULTATION`, `VOICE_CONNECTIONS_PER_ACCOUNT_DAY`, `TTS_CHARACTERS_PER_CONSULTATION`, `TTS_CHARACTERS_PER_ACCOUNT_DAY`, `TTS_PARALLEL_REQUESTS`로 조정할 수 있다.
