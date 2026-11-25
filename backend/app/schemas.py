@@ -332,6 +332,10 @@ class RealtimeConnectionRequest(StrictModel):
         return value
 
 
+class VoiceHeartbeatRequest(StrictModel):
+    connection_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class TTSRequest(StrictModel):
     response_id: str = Field(min_length=1, max_length=200, description="ID used to associate an OpenAI response with TTS playback order")
     segment_index: int = Field(ge=0, description="Zero-based audio segment index within the response")

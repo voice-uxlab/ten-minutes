@@ -475,3 +475,39 @@ test.each([
     );
   },
 );
+
+test("renews the current voice connection and stops heartbeats on dispose", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
+  const token = "a".repeat(64);
+  const heartbeat = vi.fn();
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (path, options) => {
+    if (path === `${pathPrefix}/realtime-connection`) {
+      return new Response("answer", {
+        headers: { "X-Voice-Connection": token },
+      });
+    }
+    if (path === `${pathPrefix}/voice-heartbeat`) {
+      heartbeat(JSON.parse(String(options?.body)));
+      return new Response(null, { status: 204 });
+    }
+    return originalFetch(path, options);
+  });
+
+  vi.useFakeTimers();
+  try {
+    await controller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heartbeat).toHaveBeenCalledExactlyOnceWith({
+      connection_token: token,
+    });
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    controller.dispose();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});

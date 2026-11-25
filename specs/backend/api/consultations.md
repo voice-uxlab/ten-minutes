@@ -124,7 +124,10 @@
 
 사용자가 상담을 종료하면 FastAPI가 OpenAI WebRTC 연결에 종료 요청을 보낸다.
 일시적인 실패는 `503`으로 반환하여 클라이언트가 종료 요청을 다시 보낼 수 있다.
-클라이언트 종료 요청이 오지 않은 상담에는 예약 종료가 실행되지 않는다.
+연결 응답의 `X-Voice-Connection`을 `POST /api/v1/consultations/{consultation_id}/voice-heartbeat`
+요청의 `connection_token`으로 보낸다. 정상 신호의 응답은 `204`이며, 만료되었거나
+다른 연결의 토큰이면 `409`다. 마지막 신호 후 2분부터 연결이 만료되며, Supabase 예약
+작업이 다음 점검에서 만료된 OpenAI 연결의 종료를 요청한다.
 
 ### 2.2 Typecast 음성 합성
 

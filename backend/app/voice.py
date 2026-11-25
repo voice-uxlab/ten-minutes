@@ -1,5 +1,7 @@
+import hashlib
 import json
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -18,6 +20,9 @@ from .models import (
     ensure_utc,
     uuid_string,
 )
+
+VOICE_CONNECTION_HEADER = "X-Voice-Connection"
+VOICE_IDLE_TIMEOUT = timedelta(minutes=2)
 
 OPENAI_CALLS = "https://api.openai.com/v1/realtime/calls"
 PROMPTS = Path(__file__).parent / "prompts"
@@ -109,7 +114,7 @@ def close_record(db: Session, call_id: str) -> None:
 
 def create_voice_connection(
     db: Session, consultation_id: str, user_id: str, offer: str, settings: Settings
-) -> str:
+) -> tuple[str, str]:
     reservation, prior_calls = reserve_connection(db, consultation_id, user_id, settings)
     try:
         with httpx.Client(timeout=10) as client:
@@ -151,9 +156,10 @@ def create_voice_connection(
                     and consultation.status not in {"ENDED", "ENDING", "FAILED"}
                     and response.text.startswith("v=0")
                 )
-                hangup_at = datetime.max.replace(tzinfo=timezone.utc)
-                db.add(RealtimeCall(id=call_id, consultation_id=consultation_id,
-                                    hangup_at=hangup_at if accepted else now))
+                db.add(RealtimeCall(
+                    id=call_id, consultation_id=consultation_id,
+                    hangup_at=now + VOICE_IDLE_TIMEOUT if accepted else now,
+                ))
                 if accepted and consultation.status == "CREATED":
                     consultation.status = "CONNECTING"
                 db.commit()
@@ -165,7 +171,7 @@ def create_voice_connection(
                 if hangup(client, call_id, settings.openai_api_key):
                     close_record(db, call_id)
                 raise APIError(409, "VOICE_CONNECTION_CLOSED", "The consultation is no longer available for this connection.")
-            return response.text
+            return response.text, connection_token(call_id)
     except httpx.TimeoutException as exc:
         raise APIError(504, "REALTIME_CONNECTION_TIMEOUT", "The voice connection timed out.") from exc
     except httpx.RequestError as exc:
@@ -177,6 +183,60 @@ def create_voice_connection(
             consultation.voice_reservation = None
             consultation.voice_reservation_until = None
             db.commit()
+
+
+def connection_token(call_id: str) -> str:
+    return hashlib.sha256(call_id.encode()).hexdigest()
+
+
+def renew_voice_connection(db: Session, consultation_id: str, user_id: str, token: str) -> None:
+    consultation = lock_consultation(db, consultation_id, user_id)
+    active_consultation(consultation)
+    call = db.scalar(
+        select(RealtimeCall)
+        .where(
+            RealtimeCall.consultation_id == consultation_id,
+            RealtimeCall.closed_at.is_(None),
+        )
+        .order_by(RealtimeCall.hangup_at.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    now = datetime.now(timezone.utc)
+    if (
+        call is None
+        or ensure_utc(call.hangup_at) <= now
+        or not secrets.compare_digest(connection_token(call.id), token)
+    ):
+        raise APIError(409, "VOICE_CONNECTION_INACTIVE", "This voice connection is no longer active.")
+    call.hangup_at = now + VOICE_IDLE_TIMEOUT
+    db.commit()
+
+
+def close_inactive_voice_calls(db: Session, api_key: str) -> None:
+    now = datetime.now(timezone.utc)
+    # An expired lease cannot be renewed. Holding the DB connection during provider I/O is unnecessary.
+    call_ids = list(db.scalars(
+        select(RealtimeCall.id)
+        .where(RealtimeCall.closed_at.is_(None), RealtimeCall.hangup_at <= now)
+        .order_by(RealtimeCall.hangup_at, RealtimeCall.id)
+        .limit(6)
+        .with_for_update(skip_locked=True)
+    ))
+    db.rollback()
+    failed = False
+    with httpx.Client(timeout=3) as client:
+        for call_id in call_ids:
+            try:
+                closed = hangup(client, call_id, api_key)
+            except httpx.RequestError:
+                closed = False
+            if closed:
+                close_record(db, call_id)
+            else:
+                failed = True
+    if failed:
+        raise APIError(503, "VOICE_HANGUP_RETRY", "Some inactive voice connections are still open.")
 
 
 def close_consultation_calls(db: Session, consultation_id: str, api_key: str) -> None:
@@ -213,7 +273,7 @@ def reserve_tts(
     active_consultation(consultation)
     if not db.scalar(select(RealtimeCall.id).where(
         RealtimeCall.consultation_id == consultation_id,
-        RealtimeCall.closed_at.is_(None),
+        RealtimeCall.closed_at.is_(None), RealtimeCall.hangup_at > now,
     ).limit(1)):
         raise APIError(409, "VOICE_CONNECTION_REQUIRED", "An active voice connection is required.")
     leases = {key: deadline for key, deadline in consultation.tts_leases.items() if deadline > now.timestamp()}

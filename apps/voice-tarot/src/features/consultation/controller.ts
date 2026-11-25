@@ -1,10 +1,11 @@
 import type { NoteContext } from "./domain";
 import { takeAudio } from "./audio-context";
-import { queryClient } from "@/api/client";
+import { FastApiError, queryClient } from "@/api/client";
 import {
   consultationCommand,
   finishConsultation,
   connectRealtime,
+  sendVoiceHeartbeat,
   reportsKey,
   streamSpeech,
 } from "@/api/consultations";
@@ -140,6 +141,8 @@ export class Consultation {
 
   private recorder?: MediaRecorder;
   private connectTimer?: ReturnType<typeof setTimeout>;
+  private heartbeatTimer?: ReturnType<typeof setTimeout>;
+  private heartbeatAbort?: AbortController;
   private pending = false;
   private responding = false;
   private handling = false;
@@ -473,7 +476,7 @@ export class Consultation {
       void opened.catch(() => {});
       await this.pc.setLocalDescription(await this.pc.createOffer());
       if (stale()) return;
-      const answer = await connectRealtime(
+      const { answer, connectionToken } = await connectRealtime(
         s.readingId,
         this.pc.localDescription!.sdp,
       );
@@ -486,6 +489,7 @@ export class Consultation {
       this.restore();
       this.persist();
       this.startRecording(record);
+      if (connectionToken) this.startHeartbeat(connectionToken);
       try {
         this.wake = await navigator.wakeLock?.request("screen");
         if (stale()) void this.wake?.release();
@@ -501,8 +505,7 @@ export class Consultation {
           this.stopTransport();
           this.update({
             phase: "error",
-            error:
-              "연결이 잠깐 끊겼어. 같은 카드로 다시 연결할 수 있어.",
+            error: "연결이 잠깐 끊겼어. 같은 카드로 다시 연결할 수 있어.",
           });
         }
       };
@@ -728,6 +731,37 @@ export class Consultation {
     });
     this.update({ muted });
   }
+  private startHeartbeat(token: string) {
+    const { signal } = (this.heartbeatAbort = new AbortController());
+    const beat = async () => {
+      if (signal.aborted || this.dc?.readyState !== "open") return;
+      try {
+        await sendVoiceHeartbeat(
+          this.view.session.readingId,
+          token,
+          AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        );
+      } catch (error) {
+        if (signal.aborted) return;
+        if (
+          error instanceof FastApiError &&
+          [401, 404, 409].includes(error.status)
+        ) {
+          if (this.view.phase === "ending") return;
+          this.stopTransport();
+          this.update({
+            phase: "error",
+            error: "음성 연결이 끊겼어. 같은 카드로 다시 연결할 수 있어.",
+          });
+          return;
+        }
+      }
+      if (!signal.aborted)
+        this.heartbeatTimer = setTimeout(() => void beat(), 30000);
+    };
+    void beat();
+  }
+
   private startRecording(enabled: boolean) {
     if (!enabled || !this.stream || !globalThis.MediaRecorder) return;
     try {
@@ -895,6 +929,8 @@ export class Consultation {
     this.stopped = true;
     this.generation++;
     clearTimeout(this.connectTimer);
+    clearTimeout(this.heartbeatTimer);
+    this.heartbeatAbort?.abort();
     if (this.pc) this.pc.onconnectionstatechange = null;
     if (this.recorder?.state === "recording") this.recorder.stop();
     this.speech?.close();

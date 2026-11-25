@@ -50,6 +50,7 @@ from .schemas import (
     ShareLinkResponse,
     TTSRequest,
     UpdateCurrentUserRequest,
+    VoiceHeartbeatRequest,
 )
 from .serializers import (
     card_response,
@@ -60,11 +61,14 @@ from .serializers import (
 )
 
 from .voice import (
+    VOICE_CONNECTION_HEADER,
     active_consultation,
+    close_inactive_voice_calls,
     close_consultation_calls,
     create_voice_connection,
     release_tts,
     reserve_tts,
+    renew_voice_connection,
 )
 
 
@@ -671,8 +675,46 @@ def realtime_connection(
     owned_consultation(db, consultation_id, user)
     if not settings.openai_api_key or not settings.typecast_api_key or not settings.typecast_voice_id:
         raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice providers are not configured.")
-    answer = create_voice_connection(db, str(consultation_id), user.id, body.sdp, settings)
-    return Response(answer, status_code=201, media_type="application/sdp", headers={"Cache-Control": "no-store"})
+    answer, token = create_voice_connection(db, str(consultation_id), user.id, body.sdp, settings)
+    return Response(
+        answer, status_code=201, media_type="application/sdp",
+        headers={"Cache-Control": "no-store", VOICE_CONNECTION_HEADER: token},
+    )
+
+
+@router.post(
+    "/consultations/{consultation_id}/voice-heartbeat",
+    status_code=204,
+    tags=["voice"],
+    summary="Keep a live voice connection open",
+    responses={404: CONSULTATION_NOT_FOUND_RESPONSE, 409: error_response(409)},
+)
+def voice_heartbeat(
+    consultation_id: UUID,
+    body: VoiceHeartbeatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    renew_voice_connection(db, str(consultation_id), user.id, body.connection_token)
+    return Response(status_code=204)
+
+
+@router.post("/internal/voice-cleanup", status_code=204, include_in_schema=False)
+def voice_cleanup(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    secret = settings.voice_cleanup_secret
+    scheme, _, token = authorization.partition(" ")
+    if not secret or not token or scheme.lower() != "bearer" or not secrets.compare_digest(
+        token.encode(), secret.get_secret_value().encode(),
+    ):
+        raise APIError(401, "VOICE_CLEANUP_UNAUTHORIZED", "A valid cleanup token is required.")
+    if not settings.openai_api_key:
+        raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
+    close_inactive_voice_calls(db, settings.openai_api_key)
+    return Response(status_code=204)
 
 
 @router.post(

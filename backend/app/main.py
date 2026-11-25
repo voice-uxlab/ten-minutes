@@ -8,6 +8,7 @@ from .api import public_router, router
 from .auth import router as auth_router
 from .config import get_settings
 from .errors import APIError, api_error_handler, unhandled_error_handler, validation_error_handler
+from .voice import VOICE_CONNECTION_HEADER
 
 
 settings = get_settings()
@@ -41,6 +42,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Idempotency-Key"],
+    expose_headers=[VOICE_CONNECTION_HEADER],
 )
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)

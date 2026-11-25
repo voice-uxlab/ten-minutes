@@ -158,4 +158,20 @@ PUBLIC_WEB_ORIGIN=https://ten-minutes-dev.vercel.app
 
 배포 대상 DB의 마이그레이션 이력을 확인한 뒤 `20261125_0007`까지 적용합니다.
 음성 상담 종료 요청이 OpenAI 연결을 닫고 DB에 종료를 기록하는지 확인합니다.
-브라우저가 종료 요청을 보내지 않은 상담에는 예약 종료가 실행되지 않습니다.
+연결이 살아 있는 동안 브라우저가 약 30초마다 인증된 유지 신호를 보냅니다. 신호가
+2분 이상 끊기면 DB가 다음 1분 점검에서 FastAPI에 종료를 요청합니다. 한 번에 최대
+6개의 만료 연결을 확인하며, OpenAI 요청에 실패한 연결은 다음 점검의 대상에 남습니다.
+상담 자체에 10분 제한은 없습니다. 연결만 정리하고 리포트는 자동 생성하지 않습니다.
+
+같은 Supabase DB에 다음 설정을 적용합니다.
+
+1. Vercel 백엔드에 무작위 토큰을 `VOICE_CLEANUP_SECRET`으로 설정합니다.
+2. 동일한 토큰은 Supabase Vault의 `voice_cleanup_secret`에, 해당 환경의 HTTPS 백엔드
+   주소는 `voice_cleanup_backend_origin`에 저장합니다. Vercel 배포 보호가 있다면
+   Vault의 `voice_cleanup_vercel_bypass`에 해당 프로젝트의 자동화용 키도 설정합니다.
+3. 이 버전의 프론트와 백엔드를 배포한 뒤 DB 관리자 권한으로
+   [예약 작업 SQL](../backend/sql/supabase_voice_cleanup.sql)을 적용합니다. 기존 버전에서
+   열어 둔 연결은 배포 직후 바로 끊기지 않도록 2분의 유예를 둡니다.
+4. 테스트 통화에서 브라우저를 강제 종료하고, 다음 점검 후 `realtime_calls.closed_at`이
+   기록되는지 확인합니다. Supabase Cron 실행 이력은 HTTP 요청을 등록했는지 보여주므로,
+   FastAPI 응답이나 DB의 종료 기록까지 확인합니다.

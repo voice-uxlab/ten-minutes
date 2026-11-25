@@ -191,7 +191,25 @@ export async function connectRealtime(id: string, sdp: string) {
     AbortSignal.timeout(25000),
     "response",
   );
-  return response.text();
+  return {
+    answer: await response.text(),
+    connectionToken: response.headers.get("X-Voice-Connection"),
+  };
+}
+
+export function sendVoiceHeartbeat(
+  id: string,
+  token: string,
+  signal: AbortSignal,
+) {
+  return fastApiJson<Response>(
+    `${path(id)}/voice-heartbeat`,
+    "POST",
+    { connection_token: token },
+    undefined,
+    signal,
+    "response",
+  );
 }
 
 export function streamSpeech(
