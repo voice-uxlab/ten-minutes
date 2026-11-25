@@ -28,11 +28,6 @@ PROVIDERS = {
         "token": "https://kauth.kakao.com/oauth/token",
         "profile": "https://kapi.kakao.com/v2/user/me",
     },
-    "naver": {
-        "authorize": "https://nid.naver.com/oauth2.0/authorize",
-        "token": "https://nid.naver.com/oauth2.0/token",
-        "profile": "https://openapi.naver.com/v1/nid/me",
-    },
 }
 
 
@@ -76,12 +71,9 @@ def classify_database_operational_error(exc: OperationalError) -> tuple[str, Opt
 
 
 def provider_credentials(provider: str, settings: Settings) -> tuple[str, Optional[str]]:
-    if provider == "kakao":
-        client_id, client_secret = settings.kakao_client_id, settings.kakao_client_secret
-    elif provider == "naver":
-        client_id, client_secret = settings.naver_client_id, settings.naver_client_secret
-    else:
+    if provider not in PROVIDERS:
         raise APIError(404, "AUTH_PROVIDER_NOT_FOUND", "The authentication provider is not supported.")
+    client_id, client_secret = settings.kakao_client_id, settings.kakao_client_secret
     if not client_id:
         raise APIError(503, "AUTH_PROVIDER_NOT_CONFIGURED", "The authentication provider is not configured.")
     return client_id, client_secret
@@ -118,7 +110,7 @@ def current_user(user: Optional[User] = Depends(current_user_optional)) -> User:
     status_code=302,
     summary="Start social login",
     description=(
-        "Stores a single-use OAuth `state` value and redirects to the Kakao or Naver authorization page. "
+        "Stores a single-use OAuth `state` value and redirects to the Kakao authorization page. "
         "If login initialization fails, redirects to the frontend login page with `auth_error=failed`."
     ),
     responses={
@@ -145,7 +137,7 @@ def current_user(user: Optional[User] = Depends(current_user_optional)) -> User:
 )
 def authorize(
     request: Request,
-    provider: str = Path(description="OAuth provider: `kakao` or `naver`", examples=["kakao"]),
+    provider: str = Path(description="OAuth provider: `kakao`", examples=["kakao"]),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -245,15 +237,11 @@ async def exchange_profile(
         if not profile_response.is_success:
             raise APIError(502, "OAUTH_PROFILE_FAILED", "Failed to retrieve the OAuth user profile.")
         payload = profile_response.json()
-    if provider == "kakao":
-        provider_user_id = str(payload.get("id", ""))
-        nickname = (
-            payload.get("kakao_account", {}).get("profile", {}).get("nickname")
-            or payload.get("properties", {}).get("nickname")
-        )
-    else:
-        provider_user_id = str(payload.get("response", {}).get("id", ""))
-        nickname = payload.get("response", {}).get("nickname")
+    provider_user_id = str(payload.get("id", ""))
+    nickname = (
+        payload.get("kakao_account", {}).get("profile", {}).get("nickname")
+        or payload.get("properties", {}).get("nickname")
+    )
     if not provider_user_id:
         raise APIError(502, "OAUTH_INVALID_PROFILE", "The OAuth profile does not contain a user identifier.")
     return provider_user_id, nickname
@@ -290,7 +278,7 @@ async def exchange_profile(
 )
 async def callback(
     request: Request,
-    provider: str = Path(description="OAuth provider: `kakao` or `naver`", examples=["kakao"]),
+    provider: str = Path(description="OAuth provider: `kakao`", examples=["kakao"]),
     state: str = Query(description="Single-use CSRF protection value issued when login started"),
     code: Optional[str] = Query(default=None, description="Authorization code issued by the OAuth provider"),
     error: Optional[str] = Query(default=None, description="Error code returned when the user cancels or the provider rejects the request"),

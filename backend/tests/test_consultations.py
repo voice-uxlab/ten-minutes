@@ -263,13 +263,13 @@ def test_oauth_authorize_returns_503_when_provider_is_not_configured(db_session)
     from app.main import app
 
     settings = Settings(
-        naver_client_id=None,
+        kakao_client_id=None,
         database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
     )
     app.dependency_overrides[get_settings] = lambda: settings
     try:
         with TestClient(app, follow_redirects=False) as client:
-            response = client.get("/auth/naver/authorize")
+            response = client.get("/auth/kakao/authorize")
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
@@ -288,7 +288,7 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(
 
     settings = Settings(
         public_web_origin="https://web.example.com/",
-        naver_client_id="test-client-id",
+        kakao_client_id="test-client-id",
         database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
     )
 
@@ -299,7 +299,7 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(
     app.dependency_overrides[get_settings] = lambda: settings
     try:
         with TestClient(app, follow_redirects=False) as client:
-            response = client.get("/auth/naver/authorize")
+            response = client.get("/auth/kakao/authorize")
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
@@ -642,35 +642,38 @@ def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch)
 
     settings = get_settings()
     monkeypatch.setattr(settings, "kakao_client_id", "test-kakao")
-    monkeypatch.setattr(settings, "naver_client_id", "test-naver")
     async def profile(provider, *args):
         return f"{provider}-test-account", None
     monkeypatch.setattr(auth, "exchange_profile", profile)
     with TestClient(app) as browser, TestClient(app) as other:
-        for provider in ("kakao", "naver"):
-            start = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
-            state = parse_qs(urlsplit(start.headers["location"]).query)["state"][0]
-            assert "HttpOnly" in start.headers["set-cookie"] and "SameSite=lax" in start.headers["set-cookie"]
-            path = f"/auth/{provider}/callback"
-            params = {"state": state, "code": "test-code"}
-            assert other.get(path, params=params, follow_redirects=False).status_code == 400
-            cookie_name = auth.oauth_cookie_name(provider, settings)
-            binding = browser.cookies.get(cookie_name)
-            assert browser.get(path, params=params, follow_redirects=False).status_code == 302
-            assert browser.get("/api/v1/users/me").status_code == 200
-            browser.cookies.set(cookie_name, binding)
-            assert browser.get(path, params=params, follow_redirects=False).status_code == 400
-            browser.cookies.delete(cookie_name)
+        for path in ("/auth/naver/authorize", "/auth/naver/callback?state=old&code=test"):
+            response = browser.get(path, follow_redirects=False)
+            assert response.status_code == 404
+            assert response.json()["error"]["code"] == "AUTH_PROVIDER_NOT_FOUND"
+        provider = "kakao"
+        start = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
+        state = parse_qs(urlsplit(start.headers["location"]).query)["state"][0]
+        assert "HttpOnly" in start.headers["set-cookie"] and "SameSite=lax" in start.headers["set-cookie"]
+        path = f"/auth/{provider}/callback"
+        params = {"state": state, "code": "test-code"}
+        assert other.get(path, params=params, follow_redirects=False).status_code == 400
+        cookie_name = auth.oauth_cookie_name(provider, settings)
+        binding = browser.cookies.get(cookie_name)
+        assert browser.get(path, params=params, follow_redirects=False).status_code == 302
+        assert browser.get("/api/v1/users/me").status_code == 200
+        browser.cookies.set(cookie_name, binding)
+        assert browser.get(path, params=params, follow_redirects=False).status_code == 400
+        browser.cookies.delete(cookie_name)
 
-            expired = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
-            expired_state = parse_qs(urlsplit(expired.headers["location"]).query)["state"][0]
-            attempt = db_session.scalar(select(OAuthAttempt).where(
-                OAuthAttempt.state_hash == auth.token_hash(expired_state)
-            ))
-            attempt.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
-            db_session.commit()
-            assert browser.get(path, params={**params, "state": expired_state},
-                               follow_redirects=False).status_code == 400
+        expired = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
+        expired_state = parse_qs(urlsplit(expired.headers["location"]).query)["state"][0]
+        attempt = db_session.scalar(select(OAuthAttempt).where(
+            OAuthAttempt.state_hash == auth.token_hash(expired_state)
+        ))
+        attempt.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db_session.commit()
+        assert browser.get(path, params={**params, "state": expired_state},
+                           follow_redirects=False).status_code == 400
 
 
 def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_client):

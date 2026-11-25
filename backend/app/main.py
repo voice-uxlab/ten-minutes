@@ -14,7 +14,7 @@ from .voice import VOICE_CONNECTION_HEADER
 settings = get_settings()
 
 tags_metadata = [
-    {"name": "auth", "description": "Kakao and Naver OAuth login, session issuance, and logout"},
+    {"name": "auth", "description": "Kakao OAuth login, session issuance, and logout"},
     {"name": "users", "description": "Current user profile and consultation display-name settings"},
     {"name": "consultations", "description": "Consultation creation, recovery, listing, and termination"},
     {"name": "cards", "description": "Server-side deck selection and sequential card reveal"},
