@@ -2,13 +2,14 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import Settings
+from .config import Settings, get_settings
 from .errors import APIError
 from .models import (
     Consultation,
@@ -29,7 +30,7 @@ TOOLS = json.loads((PROMPTS / "realtime_tools.json").read_text(encoding="utf-8")
 def active_consultation(consultation: Consultation, now: datetime) -> None:
     if consultation.status in {"ENDED", "ENDING", "FAILED"}:
         raise APIError(409, "CONSULTATION_STATE_CONFLICT", "The consultation has ended.")
-    if consultation.call_ends_at <= now:
+    if get_settings().voice_deadline_enabled and consultation.call_ends_at <= now:
         raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
 
 
@@ -60,7 +61,7 @@ def locked_daily_usage(db: Session, user_id: str, now: datetime) -> VoiceAccount
 
 def reserve_connection(
     db: Session, consultation_id: str, user_id: str, settings: Settings
-) -> tuple[str, list[str], datetime]:
+) -> tuple[str, list[str], Optional[datetime]]:
     lock_account(db, user_id)
     consultation = lock_consultation(db, consultation_id, user_id)
     now = datetime.now(timezone.utc)
@@ -95,7 +96,7 @@ def reserve_connection(
     consultation.voice_reservation = reservation
     # Keep the lease visible if the deadline passes during the upstream handshake.
     consultation.voice_reservation_until = now + timedelta(seconds=60)
-    deadline = consultation.call_ends_at
+    deadline = consultation.call_ends_at if settings.voice_deadline_enabled else None
     db.commit()
     return reservation, prior, deadline
 
@@ -117,9 +118,10 @@ def create_voice_connection(
 ) -> str:
     reservation, prior_calls, deadline = reserve_connection(db, consultation_id, user_id, settings)
     try:
-        schedule_voice_hangup(settings, consultation_id, deadline)
-        if datetime.now(timezone.utc) >= deadline:
-            raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
+        if deadline is not None:
+            schedule_voice_hangup(settings, consultation_id, deadline)
+            if datetime.now(timezone.utc) >= deadline:
+                raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
         with httpx.Client(timeout=10) as client:
             for prior in prior_calls:
                 if not hangup(client, prior, settings.openai_api_key):
@@ -157,11 +159,12 @@ def create_voice_connection(
                 accepted = (
                     consultation.voice_reservation == reservation
                     and consultation.status not in {"ENDED", "ENDING", "FAILED"}
-                    and consultation.call_ends_at > now
+                    and (deadline is None or deadline > now)
                     and response.text.startswith("v=0")
                 )
+                hangup_at = deadline or datetime.max.replace(tzinfo=timezone.utc)
                 db.add(RealtimeCall(id=call_id, consultation_id=consultation_id,
-                                    hangup_at=consultation.call_ends_at if accepted else now))
+                                    hangup_at=hangup_at if accepted else now))
                 if accepted and consultation.status == "CREATED":
                     consultation.status = "CONNECTING"
                 db.commit()
@@ -220,7 +223,7 @@ def close_scheduled_consultation(db: Session, consultation_id: str, api_key: str
 
 def reserve_tts(
     db: Session, consultation_id: str, user_id: str, characters: int, settings: Settings
-) -> tuple[str, float]:
+) -> tuple[str, Optional[float]]:
     lock_account(db, user_id)
     consultation = lock_consultation(db, consultation_id, user_id)
     now = datetime.now(timezone.utc)
@@ -242,7 +245,8 @@ def reserve_tts(
     consultation.tts_leases = leases
     consultation.tts_characters += characters
     db.commit()
-    return lease, consultation.call_ends_at.timestamp()
+    deadline = consultation.call_ends_at.timestamp() if settings.voice_deadline_enabled else None
+    return lease, deadline
 
 
 def release_tts(bind, consultation_id: str, lease: str) -> None:

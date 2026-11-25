@@ -222,7 +222,9 @@ function Call({ initial }: { initial: Session }) {
   const timer =
     v.phase === "connecting"
       ? "연결 중"
-      : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`;
+      : s.endAt === undefined
+        ? "상담 중"
+        : `${String(Math.floor(v.remaining / 60)).padStart(2, "0")}:${String(v.remaining % 60).padStart(2, "0")}`;
   const ordinal =
     focused && ["첫 번째", "두 번째", "세 번째"][focused.slot - 1];
   const heading = retry
@@ -242,7 +244,7 @@ function Call({ initial }: { initial: Session }) {
     <section className="page metallic-page call-page" data-phase={phase}>
       <BrandHeader>
         <span
-          className={`timer glass${v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
+          className={`timer glass${v.phase !== "connecting" && s.endAt !== undefined && v.remaining <= 60 ? " warning" : ""}`}
         >
           ● {timer}
         </span>

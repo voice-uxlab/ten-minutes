@@ -562,6 +562,56 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
     assert client.request("POST", f"{second_path}/realtime-connection", json=offer).json()["error"]["code"] == "CONSULTATION_EXPIRED"
 
 
+def test_local_consultation_without_deadline_still_hangs_up_manually(authenticated_client, db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+
+    import httpx
+
+    from app.config import get_settings
+    from app.models import Consultation, RealtimeCall
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    monkeypatch.setattr(settings, "app_env", "local")
+    monkeypatch.setattr(settings, "local_disable_voice_deadline", True)
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(settings, "typecast_api_key", "test-key")
+    monkeypatch.setattr(settings, "typecast_voice_id", "test-voice")
+    schedule = Mock()
+    monkeypatch.setattr("app.voice.schedule_voice_hangup", schedule)
+    monkeypatch.setattr("app.api.schedule_voice_hangup", schedule)
+    provider = Mock(side_effect=[
+        httpx.Response(
+            201,
+            text="v=0\r\nanswer",
+            headers={"Location": "/v1/realtime/calls/rtc_local"},
+        ),
+        httpx.Response(200),
+    ])
+    monkeypatch.setattr(httpx.Client, "post", provider)
+    consultation = client.request(
+        "POST", "/api/v1/consultations", json={"consent_version": "2026-11"},
+    ).json()
+    assert consultation["call_ends_at"] is None
+
+    stored = db_session.get(Consultation, consultation["id"])
+    stored.created_at = datetime.now(timezone.utc) - timedelta(minutes=11)
+    db_session.commit()
+    path = f"/api/v1/consultations/{stored.id}"
+    assert client.request("POST", f"{path}/realtime-connection", json={"sdp": "v=0\r\noffer"}).status_code == 201
+    assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 200
+    assert db_session.get(RealtimeCall, "rtc_local").closed_at is not None
+    assert provider.call_args.args[0].endswith("/rtc_local/hangup")
+    schedule.assert_not_called()
+
+    monkeypatch.setattr(settings, "app_env", "preview")
+    assert client.get(path).json()["call_ends_at"] is not None
+    monkeypatch.setattr(settings, "app_env", "local")
+    monkeypatch.setattr(settings, "backend_origin", "https://preview.example.com")
+    assert client.get(path).json()["call_ends_at"] is not None
+
+
 def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch):
     from datetime import datetime, timedelta, timezone
     from urllib.parse import parse_qs, urlsplit

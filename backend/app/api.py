@@ -425,7 +425,9 @@ def end_consultation(
         ).limit(1)
     )
     db.commit()
-    if needs_hangup:
+    if needs_hangup and not settings.voice_deadline_enabled and settings.openai_api_key:
+        close_scheduled_consultation(db, str(consultation_id), settings.openai_api_key)
+    elif needs_hangup:
         try:
             schedule_voice_hangup(settings, str(consultation_id), datetime.now(timezone.utc), early=True)
         except APIError:
@@ -739,7 +741,7 @@ async def tts_stream(
     lease, deadline = await run_in_threadpool(reserve_tts, db, consultation_key, user.id, len(body.text), settings)
     client = httpx.AsyncClient(timeout=15)
     upstream = None
-    left = min(30, deadline - datetime.now(timezone.utc).timestamp())
+    left = 30 if deadline is None else min(30, deadline - datetime.now(timezone.utc).timestamp())
     end_time = anyio.current_time() + left
     cleaned = False
 

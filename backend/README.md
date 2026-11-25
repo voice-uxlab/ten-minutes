@@ -18,6 +18,11 @@ uv run uvicorn app.main:app --reload --port 8000
 - OpenAPI UI: `http://localhost:8000/docs`
 - 테스트: `uv run pytest`
 
+Cloud Tasks 없이 시간을 제한하지 않는 로컬 상담을 테스트하려면 백엔드를 실행할 때
+`APP_ENV=local`과 `LOCAL_DISABLE_VOICE_DEADLINE=true`를 설정하세요. 이 모드에서는
+종료 버튼으로 통화를 닫습니다. 브라우저가 갑자기 닫히면 서버가 10분에 연결을
+정리하지 않습니다.
+
 ## API 문서 사용법
 
 서버 실행 후 `http://localhost:8000/docs`에서 API별 요청 파라미터, 응답 필드와 상태 코드

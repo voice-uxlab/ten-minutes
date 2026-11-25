@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "local"
+    local_disable_voice_deadline: bool = False
     backend_origin: str = "http://localhost:8000"
     public_web_origin: str = "http://localhost:5173"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes"
@@ -46,6 +48,15 @@ class Settings(BaseSettings):
     default_card_count: int = Field(default=3, ge=1, le=10)
     max_question_length: int = Field(default=300, ge=1, le=1000)
     max_tts_text_length: int = Field(default=500, ge=1, le=5000)
+
+
+    @property
+    def voice_deadline_enabled(self) -> bool:
+        return not (
+            self.app_env == "local"
+            and self.local_disable_voice_deadline
+            and urlsplit(self.backend_origin).hostname in {"localhost", "127.0.0.1", "::1"}
+        )
 
 
 @lru_cache

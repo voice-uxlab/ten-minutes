@@ -494,8 +494,10 @@ export class Consultation {
       this.restore();
       this.persist();
       this.startRecording(record);
-      this.timer = setInterval(() => this.tick(), 500);
-      this.tick();
+      if (s.endAt !== undefined) {
+        this.timer = setInterval(() => this.tick(), 500);
+        this.tick();
+      }
       try {
         this.wake = await navigator.wakeLock?.request("screen");
         if (stale()) void this.wake?.release();
@@ -804,7 +806,7 @@ export class Consultation {
     this.persist();
     await this.queue.catch(() => {});
     const s = this.view.session;
-    const remaining = (s.endAt ?? Date.now()) - Date.now();
+    const remaining = s.endAt === undefined ? 25000 : s.endAt - Date.now();
     let result: Partial<Report> | null = null;
     if (reason === "USER" && remaining > 0 && this.dc?.readyState === "open") {
       if (this.responding) this.send({ type: "response.cancel" });

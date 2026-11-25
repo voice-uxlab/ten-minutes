@@ -29,7 +29,7 @@ interface ConsultationResponse {
   spread_type: string | null;
   status: string;
   created_at: string;
-  call_ends_at: string;
+  call_ends_at: string | null;
   cards: ApiCard[];
   report_status: string | null;
 }
@@ -97,7 +97,7 @@ function sessionFromApi(data: ConsultationResponse, local?: Session): Session {
     readingId: data.id,
     date: data.created_at,
     connected: data.status !== "CREATED",
-    endAt: Date.parse(data.call_ends_at),
+    endAt: data.call_ends_at ? Date.parse(data.call_ends_at) : undefined,
     ended: data.status === "ENDED" || data.status === "FAILED",
     reportPending: !!local?.reportPending && !data.report_status,
     demo: false,
