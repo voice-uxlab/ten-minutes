@@ -80,6 +80,7 @@ class CurrentUserResponse(StrictModel):
     nickname: Optional[str] = Field(description="Display name used when addressing mode is CUSTOM")
     provider: Optional[str] = Field(description="Connected OAuth provider, or null when no identity is linked")
     onboarding_required: bool = Field(description="Whether display-name or required-consent setup is incomplete")
+    consent_version: Optional[str] = Field(description="The last AI-processing consent version accepted by this user")
     created_at: datetime = Field(description="User creation timestamp in UTC ISO 8601 format")
 
 
@@ -150,6 +151,7 @@ class ConsultationResponse(StrictModel):
     report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report exists")
     created_at: datetime = Field(description="Consultation creation timestamp")
     ended_at: Optional[datetime] = Field(description="Consultation end timestamp, or null while active")
+    call_ends_at: datetime = Field(description="Server deadline for the ten-minute call")
 
 
 class ConsultationListItem(StrictModel):
@@ -239,9 +241,9 @@ class SaveReportRequest(StrictModel):
 class ReportResponse(StrictModel):
     consultation_id: UUID = Field(description="Consultation ID associated with the report")
     status: ReportStatus = Field(description="Report generation state")
-    spread_type: SpreadType = Field(description="Spread type used for the consultation")
+    spread_type: Optional[SpreadType] = Field(description="Spread type used for the consultation")
     consulted_at: datetime = Field(description="Consultation start timestamp")
-    question: str = Field(description="Question confirmed during the consultation")
+    question: Optional[str] = Field(description="Confirmed question, or null if the call ended early")
     cards: list[ReportCardResponse] = Field(description="Revealed cards with images and individual readings")
     situation_summary: str = Field(description="One-line situation summary")
     readings: list[CardReading] = Field(description="Per-slot card readings")
@@ -319,21 +321,19 @@ class ClientEventResponse(StrictModel):
     stored_at: datetime = Field(description="Server storage timestamp")
 
 
-class RealtimeCredentialRequest(StrictModel):
-    connection_reason: str = Field(description="Connection reason: INITIAL or RECONNECT", examples=["INITIAL"])
+class RealtimeConnectionRequest(StrictModel):
+    sdp: str = Field(min_length=8, max_length=65536, description="WebRTC SDP offer")
 
-    @field_validator("connection_reason")
+    @field_validator("sdp")
     @classmethod
-    def valid_reason(cls, value: str) -> str:
-        if value not in {"INITIAL", "RECONNECT"}:
-            raise ValueError("unsupported connection reason")
+    def valid_offer(cls, value: str) -> str:
+        if not value.startswith(("v=0\r\n", "v=0\n")):
+            raise ValueError("invalid SDP offer")
         return value
 
 
-class RealtimeCredentialResponse(StrictModel):
-    client_secret: str = Field(description="Short-lived secret used only for a direct browser connection to OpenAI Realtime")
-    expires_at: int = Field(description="Client secret expiration time as a Unix timestamp")
-    realtime_model: str = Field(description="OpenAI Realtime model to connect to")
+class VoiceHeartbeatRequest(StrictModel):
+    connection_token: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class TTSRequest(StrictModel):

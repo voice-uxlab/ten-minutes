@@ -28,7 +28,7 @@
 }
 ```
 
-카드 수와 덱 크기는 FE가 보내지 않고 서버의 상담 시나리오 설정으로 정한다.
+카드 수와 덱 크기는 서버가 정한다. `call_ends_at`은 상담 생성 시각에서 10분 후이며 재연결해도 유지된다.
 
 **Response `201` — `ConsultationResponse`**
 
@@ -42,7 +42,8 @@
   "cards": [],
   "report_status": null,
   "created_at": "2026-11-12T10:00:00Z",
-  "ended_at": null
+  "ended_at": null,
+  "call_ends_at": "2026-11-12T10:10:00Z"
 }
 ```
 
@@ -107,35 +108,26 @@
 `reason`은 우선 `USER`, `TIMEOUT`, `ERROR`만 허용한다. 최종 enum은 상담 종료 정책을 정할 때 확정한다.
 
 **Response:** `200 ConsultationResponse`  
-이미 종료된 상담은 현재 종료 상태를 반환한다. 연결 종료와 리포트 완료는 별도 상태다.
+이미 종료된 상담의 종료 요청을 다시 받으면, 남아 있는 OpenAI 연결만 종료한다. 연결 종료와 리포트 완료는 별도 상태다.
 
 ## 2. 음성 API
 
-### 2.1 Realtime client secret 발급
+### 2.1 Realtime WebRTC 연결
 
-`POST /api/v1/consultations/{consultation_id}/realtime-credentials`
+`POST /api/v1/consultations/{consultation_id}/realtime-connection`
 
-**Request body**
+인증된 브라우저가 JSON의 `sdp` 필드로 WebRTC SDP offer를 보낸다. FastAPI가 OpenAI에 세션 설정과 offer를 전달하고 `201 application/sdp`로 answer를 반환한다. 응답은 캐시하지 않는다. OpenAI 서비스 키는 백엔드에만 있고 call ID는 종료 작업을 위해 DB에 저장한다.
 
-```json
-{
-  "connection_reason": "INITIAL"
-}
-```
+계정마다 활성 통화는 하나만 허용한다. 같은 상담을 재연결하면 이전 OpenAI 통화를 닫는다.
+같은 계정의 이전 상담이 열려 있으면 종료를 기록하고 OpenAI 연결을 끊은 후 새 연결을 생성한다. 이전 연결 종료가 실패하면 새 연결을 열지 않으며 다시 요청할 수 있다. 같은 상담에 재연결하면 기존 만료 시각을 유지한다. 같은 계정에서 연결 생성이 이미 진행 중이거나 요청한 상담이 종료됐으면 `409`다.
+상담 또는 계정의 발급 한도에 도달하면 `429`다.
 
-`connection_reason`은 `INITIAL` 또는 `RECONNECT`다.
-
-**Response `201`**
-
-```json
-{
-  "client_secret": "ek_...",
-  "expires_at": 1794304860,
-  "realtime_model": "TBD"
-}
-```
-
-`expires_at`은 OpenAI 응답 형식에 맞춘 Unix timestamp 정수다. client secret은 로그나 DB에 저장하지 않는다.
+사용자가 상담을 종료하면 FastAPI가 OpenAI WebRTC 연결에 종료 요청을 보낸다.
+일시적인 실패는 `503`으로 반환하여 클라이언트가 종료 요청을 다시 보낼 수 있다.
+연결 응답의 `X-Voice-Connection`을 `POST /api/v1/consultations/{consultation_id}/voice-heartbeat`
+요청의 `connection_token`으로 보낸다. 정상 신호의 응답은 `204`이며, 만료되었거나
+다른 연결의 토큰이면 `409`다. 마지막 신호 후 2분부터 연결이 만료되며, Supabase 예약
+작업이 다음 점검에서 만료된 OpenAI 연결의 종료를 요청한다.
 
 ### 2.2 Typecast 음성 합성
 
@@ -155,13 +147,16 @@
 |---|---|---|
 | `response_id` | `str` | OpenAI 응답과 재생 순서 연결 |
 | `segment_index` | `int` | 0 이상 |
-| `text` | `str` | 글자 수 제한 **TBD** |
+| `text` | `str` | 1–500자 |
 
 **Response `200`**
 
 - `StreamingResponse`
-- `Content-Type`: 실제 Typecast 출력 포맷 검증 후 **TBD**
+- `Content-Type`: `audio/wav` 스트림, 합성 속도 1.3배
 - JSON body 없음
+
+FastAPI 연결이 활성 상태여야 하고, 상담 종료 시각을 넘긴 합성은 허용하지 않는다.
+상담별/계정별 합성 글자 수나 동시 합성 요청 제한을 초과하면 `429`다.
 
 활성 상담의 소유자만 호출할 수 있다. 모델과 voice ID는 서버 설정에서 정하며 요청 body로 받지 않는다. 상담별 글자 수, 호출 빈도, 동시 합성 수 제한은 **TBD**다. 텍스트와 생성 오디오는 DB나 로그에 저장하지 않는다.
 
@@ -286,7 +281,7 @@ slot 1부터 순서대로 공개한다. 이미 공개한 slot은 같은 결과�
 
 ```json
 {
-  "summary": "세 장의 카드는 자신의 기준을 살피라고 말해.",
+  "situation_summary": "세 장의 카드는 자신의 기준을 살피라고 말해.",
   "readings": [
     {"slot": 1, "text": "첫 번째 카드 해석"}
   ],
@@ -294,7 +289,7 @@ slot 1부터 순서대로 공개한다. 이미 공개한 slot은 같은 결과�
 }
 ```
 
-`readings`의 slot은 공개된 카드와 일치해야 한다. 문자열과 배열의 최대 길이는 **TBD**다. 질문과 카드 정보는 요청 body에서 받지 않고 서버에 저장된 값을 사용한다.
+`readings`의 slot은 공개된 카드와 일치해야 한다. 통화가 종료됐다면 일부 카드 또는 카드가 없는 상태에서도 요약을 저장할 수 있다. 상황 요약은 최대 500자, 해석은 카드별 최대 1,000자, 마무리는 최대 300자다. 질문과 카드 정보는 서버 기록을 사용한다.
 
 **Response:** `201` 최초 저장, `200` 동일 결과 재요청 — `ReportResponse`  
 **주요 오류:** `409 CARDS_NOT_FULLY_REVEALED`, `422 VALIDATION_ERROR`

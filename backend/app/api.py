@@ -1,16 +1,18 @@
 import hashlib
 import secrets
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
+import anyio
 import httpx
 from fastapi import APIRouter, Depends, Header, Path as PathParameter, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from .auth import current_user
 from .config import Settings, get_settings
@@ -21,6 +23,7 @@ from .models import (
     ConsultationCard,
     ConsultationEvent,
     ConsultationReport,
+    RealtimeCall,
     ShareLink,
     TarotCard,
     User,
@@ -40,14 +43,14 @@ from .schemas import (
     CurrentUserResponse,
     EndConsultationRequest,
     PublicShareResponse,
-    RealtimeCredentialRequest,
-    RealtimeCredentialResponse,
+    RealtimeConnectionRequest,
     ReportResponse,
     SPREAD_POSITIONS,
     SaveReportRequest,
     ShareLinkResponse,
     TTSRequest,
     UpdateCurrentUserRequest,
+    VoiceHeartbeatRequest,
 )
 from .serializers import (
     card_response,
@@ -57,10 +60,20 @@ from .serializers import (
     user_response,
 )
 
+from .voice import (
+    VOICE_CONNECTION_HEADER,
+    active_consultation,
+    close_inactive_voice_calls,
+    close_consultation_calls,
+    create_voice_connection,
+    release_tts,
+    reserve_tts,
+    renew_voice_connection,
+)
+
 
 router = APIRouter(prefix="/api/v1", responses=AUTHENTICATED_RESPONSES)
 public_router = APIRouter(prefix="/api/v1", tags=["shares"], responses=PUBLIC_RESPONSES)
-PROMPT_PATH = Path(__file__).parent / "prompts" / "tarot_reader.md"
 
 CONSULTATION_NOT_FOUND_RESPONSE = error_response(
     404,
@@ -75,12 +88,11 @@ def token_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def owned_consultation(db: Session, consultation_id: UUID, user: User) -> Consultation:
-    consultation = db.scalar(
-        select(Consultation).where(
-            Consultation.id == str(consultation_id), Consultation.user_id == user.id
-        )
+def owned_consultation(db: Session, consultation_id: UUID, user: User, *, lock: bool = False) -> Consultation:
+    query = select(Consultation).where(
+        Consultation.id == str(consultation_id), Consultation.user_id == user.id
     )
+    consultation = db.scalar(query.with_for_update() if lock else query)
     if not consultation:
         raise APIError(404, "CONSULTATION_NOT_FOUND", "The consultation was not found.")
     return consultation
@@ -282,7 +294,7 @@ def select_cards(
     user: User = Depends(current_user),
 ):
     del idempotency_key
-    consultation = owned_consultation(db, consultation_id, user)
+    consultation = owned_consultation(db, consultation_id, user, lock=True)
     positions = SPREAD_POSITIONS[body.spread_type]
     if len(body.picks) != consultation.expected_card_count:
         raise APIError(422, "INVALID_CARD_COUNT", "The selected card count is invalid.")
@@ -302,8 +314,7 @@ def select_cards(
             "spread_type": consultation.spread_type,
             "cards": [card_response(card) for card in consultation.cards],
         }
-    if consultation.status in {"ENDED", "FAILED"}:
-        raise APIError(409, "CONSULTATION_STATE_CONFLICT", "Cards cannot be selected for an ended consultation.")
+    active_consultation(consultation)
     consultation.question = body.question
     consultation.spread_type = body.spread_type.value
     consultation.status = "ACTIVE"
@@ -362,7 +373,7 @@ def reveal_card(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    consultation = owned_consultation(db, consultation_id, user)
+    consultation = owned_consultation(db, consultation_id, user, lock=True)
     if not consultation.cards:
         raise APIError(409, "CARD_SELECTION_REQUIRED", "Select the cards before revealing them.")
     if slot < 1 or slot > consultation.expected_card_count:
@@ -375,6 +386,7 @@ def reveal_card(
         if previous.revealed_at is None:
             raise APIError(409, "PREVIOUS_CARD_NOT_REVEALED", "Reveal the previous card first.")
     if card.revealed_at is None:
+        active_consultation(consultation)
         card.revealed_at = datetime.now(timezone.utc)
         db.commit()
     return {"card": card_response(card)}
@@ -385,7 +397,7 @@ def reveal_card(
     response_model=ConsultationResponse,
     tags=["consultations"],
     summary="End consultation",
-    description="Stores the termination reason and timestamp. Returns the existing result when the consultation has already ended.",
+    description="Stores the termination reason and closes any open Realtime connection. Repeating the request retries an unconfirmed hangup.",
     responses={404: CONSULTATION_NOT_FOUND_RESPONSE, 422: VALIDATION_RESPONSE},
 )
 def end_consultation(
@@ -393,14 +405,30 @@ def end_consultation(
     consultation_id: UUID = PathParameter(description="Consultation ID to end"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
+    settings: Settings = Depends(get_settings),
 ):
-    consultation = owned_consultation(db, consultation_id, user)
+    consultation = owned_consultation(db, consultation_id, user, lock=True)
     if consultation.status != "ENDED":
         consultation.status = "ENDED"
         consultation.end_reason = body.reason
         consultation.ended_at = datetime.now(timezone.utc)
-        db.commit()
-    return consultation_response(consultation)
+        db.execute(update(RealtimeCall).where(
+            RealtimeCall.consultation_id == consultation.id,
+            RealtimeCall.closed_at.is_(None),
+            RealtimeCall.hangup_at > consultation.ended_at,
+        ).values(hangup_at=consultation.ended_at))
+    result = consultation_response(consultation)
+    needs_hangup = bool(consultation.voice_reservation) or db.scalar(
+        select(RealtimeCall.id).where(
+            RealtimeCall.consultation_id == consultation.id, RealtimeCall.closed_at.is_(None)
+        ).limit(1)
+    )
+    db.commit()
+    if needs_hangup:
+        if not settings.openai_api_key:
+            raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
+        close_consultation_calls(db, str(consultation_id), settings.openai_api_key)
+    return result
 
 
 @router.put(
@@ -409,7 +437,7 @@ def end_consultation(
     status_code=201,
     tags=["reports"],
     summary="Save report",
-    description="Stores the situation summary, per-card readings, and closing message after every card is revealed. Retrying the same request returns the existing result with status 200.",
+    description="Stores the situation summary, per-card readings, and closing message after the call ends or every card is revealed. Retrying the same request returns the existing result with status 200.",
     responses={
         404: CONSULTATION_NOT_FOUND_RESPONSE,
         409: error_response(
@@ -435,10 +463,10 @@ def save_report(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    consultation = owned_consultation(db, consultation_id, user)
-    if not consultation.cards or any(card.revealed_at is None for card in consultation.cards):
+    consultation = owned_consultation(db, consultation_id, user, lock=True)
+    expected_slots = [card.slot for card in consultation.cards if card.revealed_at is not None]
+    if consultation.status != "ENDED" and len(expected_slots) != consultation.expected_card_count:
         raise APIError(409, "CARDS_NOT_FULLY_REVEALED", "Reveal every card in order before saving the report.")
-    expected_slots = list(range(1, consultation.expected_card_count + 1))
     if sorted(reading.slot for reading in body.readings) != expected_slots:
         raise APIError(422, "INVALID_REPORT_READINGS", "Report readings must match every revealed card.")
     normalized_readings = [reading.model_dump() for reading in sorted(body.readings, key=lambda item: item.slot)]
@@ -620,80 +648,73 @@ def save_event(
     return {"event_id": event.id, "stored_at": ensure_utc(event.stored_at)}
 
 
-def active_voice_consultation(db: Session, consultation_id: UUID, user: User) -> Consultation:
-    consultation = owned_consultation(db, consultation_id, user)
-    if consultation.status in {"ENDED", "ENDING", "FAILED"}:
-        raise APIError(409, "CONSULTATION_STATE_CONFLICT", "Audio cannot be generated for an ended consultation.")
-    return consultation
-
-
 @router.post(
-    "/consultations/{consultation_id}/realtime-credentials",
-    response_model=RealtimeCredentialResponse,
+    "/consultations/{consultation_id}/realtime-connection",
+    response_class=Response,
     status_code=201,
     tags=["voice"],
-    summary="Issue OpenAI Realtime client secret",
-    description="Issues a short-lived client secret for a direct browser connection to OpenAI Realtime over WebRTC.",
+    summary="Connect a browser to OpenAI Realtime",
     responses={
+        201: {"content": {"application/sdp": {"schema": {"type": "string"}}}},
         404: CONSULTATION_NOT_FOUND_RESPONSE,
-        409: error_response(
-            409,
-            examples={"state_conflict": ("CONSULTATION_STATE_CONFLICT", "Audio cannot be generated for an ended consultation.")},
-        ),
+        409: error_response(409),
         422: VALIDATION_RESPONSE,
+        429: error_response(429),
         502: error_response(502),
-        503: error_response(
-            503,
-            examples={"openai_not_configured": ("OPENAI_NOT_CONFIGURED", "OpenAI Realtime is not configured.")},
-        ),
+        503: error_response(503),
         504: error_response(504),
     },
 )
-async def realtime_credentials(
-    body: RealtimeCredentialRequest,
-    consultation_id: UUID = PathParameter(description="Consultation ID used to prepare the Realtime connection"),
+def realtime_connection(
+    body: RealtimeConnectionRequest,
+    consultation_id: UUID = PathParameter(description="Consultation ID to connect"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
     settings: Settings = Depends(get_settings),
 ):
-    del body
-    consultation = active_voice_consultation(db, consultation_id, user)
+    owned_consultation(db, consultation_id, user)
+    if not settings.openai_api_key or not settings.typecast_api_key or not settings.typecast_voice_id:
+        raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice providers are not configured.")
+    answer, token = create_voice_connection(db, str(consultation_id), user.id, body.sdp, settings)
+    return Response(
+        answer, status_code=201, media_type="application/sdp",
+        headers={"Cache-Control": "no-store", VOICE_CONNECTION_HEADER: token},
+    )
+
+
+@router.post(
+    "/consultations/{consultation_id}/voice-heartbeat",
+    status_code=204,
+    tags=["voice"],
+    summary="Keep a live voice connection open",
+    responses={404: CONSULTATION_NOT_FOUND_RESPONSE, 409: error_response(409)},
+)
+def voice_heartbeat(
+    consultation_id: UUID,
+    body: VoiceHeartbeatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    renew_voice_connection(db, str(consultation_id), user.id, body.connection_token)
+    return Response(status_code=204)
+
+
+@router.post("/internal/voice-cleanup", status_code=204, include_in_schema=False)
+def voice_cleanup(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    secret = settings.voice_cleanup_secret
+    scheme, _, token = authorization.partition(" ")
+    if not secret or not token or scheme.lower() != "bearer" or not secrets.compare_digest(
+        token.encode(), secret.get_secret_value().encode(),
+    ):
+        raise APIError(401, "VOICE_CLEANUP_UNAUTHORIZED", "A valid cleanup token is required.")
     if not settings.openai_api_key:
-        raise APIError(503, "OPENAI_NOT_CONFIGURED", "OpenAI Realtime is not configured.")
-    instructions = PROMPT_PATH.read_text(encoding="utf-8")
-    payload = {
-        "session": {
-            "type": "realtime",
-            "model": settings.openai_realtime_model,
-            "instructions": instructions,
-            "output_modalities": ["text"],
-            "audio": {
-                "input": {
-                    "turn_detection": {"type": "semantic_vad", "eagerness": "medium"},
-                    "transcription": {"model": "gpt-4o-mini-transcribe", "language": "ko"},
-                }
-            },
-        }
-    }
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            upstream = await client.post(
-                "https://api.openai.com/v1/realtime/client_secrets",
-                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                json=payload,
-            )
-    except httpx.TimeoutException:
-        raise APIError(504, "REALTIME_CREDENTIAL_TIMEOUT", "Preparing the Realtime connection timed out.")
-    if not upstream.is_success:
-        raise APIError(502, "REALTIME_CREDENTIAL_FAILED", "Failed to prepare the Realtime connection.")
-    data = upstream.json()
-    secret = data.get("value") or data.get("client_secret", {}).get("value")
-    expires_at = data.get("expires_at") or data.get("client_secret", {}).get("expires_at")
-    if not secret or not expires_at:
-        raise APIError(502, "REALTIME_INVALID_RESPONSE", "OpenAI Realtime returned an invalid response.")
-    consultation.status = "CONNECTING"
-    db.commit()
-    return {"client_secret": secret, "expires_at": expires_at, "realtime_model": settings.openai_realtime_model}
+        raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
+    close_inactive_voice_calls(db, settings.openai_api_key)
+    return Response(status_code=204)
 
 
 @router.post(
@@ -704,7 +725,7 @@ async def realtime_credentials(
     responses={
         200: {
             "description": "Audio byte stream using the Content-Type returned by Typecast",
-            "content": {"audio/mpeg": {"schema": {"type": "string", "format": "binary"}}},
+            "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
         },
         404: CONSULTATION_NOT_FOUND_RESPONSE,
         409: error_response(
@@ -712,6 +733,7 @@ async def realtime_credentials(
             examples={"state_conflict": ("CONSULTATION_STATE_CONFLICT", "Audio cannot be generated for an ended consultation.")},
         ),
         422: VALIDATION_RESPONSE,
+        429: error_response(429),
         502: error_response(502),
         503: error_response(
             503,
@@ -727,41 +749,79 @@ async def tts_stream(
     user: User = Depends(current_user),
     settings: Settings = Depends(get_settings),
 ):
-    _request_order = (body.response_id, body.segment_index)
-    del _request_order
-    active_voice_consultation(db, consultation_id, user)
     if not settings.typecast_api_key or not settings.typecast_voice_id:
+        await run_in_threadpool(owned_consultation, db, consultation_id, user)
         raise APIError(503, "TYPECAST_NOT_CONFIGURED", "Typecast speech synthesis is not configured.")
-    client = httpx.AsyncClient(timeout=30)
-    request = client.build_request(
-        "POST",
-        "https://api.typecast.ai/v1/text-to-speech/stream",
-        headers={"X-API-KEY": settings.typecast_api_key},
-        json={
-            "voice_id": settings.typecast_voice_id,
-            "model": settings.typecast_model,
-            "language": "kor",
-            "text": body.text,
-        },
-    )
-    try:
-        upstream = await client.send(request, stream=True)
-    except httpx.TimeoutException:
-        await client.aclose()
-        raise APIError(504, "TTS_TIMEOUT", "Speech synthesis timed out.")
-    if not upstream.is_success:
-        await upstream.aclose()
-        await client.aclose()
-        raise APIError(502, "TTS_FAILED", "Speech synthesis failed.")
+    consultation_key = str(consultation_id)
+    bind = db.get_bind()
+    lease = await run_in_threadpool(reserve_tts, db, consultation_key, user.id, len(body.text), settings)
+    client = httpx.AsyncClient(timeout=15)
+    upstream = None
+    end_time = anyio.current_time() + 30
+    cleaned = False
 
-    async def chunks():
+    async def cleanup():
+        nonlocal cleaned
+        if cleaned:
+            return
+        cleaned = True
         try:
-            async for chunk in upstream.aiter_bytes():
-                yield chunk
+            with anyio.move_on_after(5, shield=True):
+                try:
+                    if upstream is not None:
+                        await upstream.aclose()
+                finally:
+                    await client.aclose()
         finally:
-            await upstream.aclose()
-            await client.aclose()
+            with anyio.move_on_after(5, shield=True):
+                await run_in_threadpool(release_tts, bind, consultation_key, lease)
 
-    return StreamingResponse(
-        chunks(), media_type=upstream.headers.get("content-type", "application/octet-stream")
-    )
+    forwarded = False
+    try:
+        request = client.build_request(
+            "POST",
+            "https://api.typecast.ai/v1/text-to-speech/stream",
+            headers={"X-API-KEY": settings.typecast_api_key},
+            json={
+                "voice_id": settings.typecast_voice_id,
+                "model": settings.typecast_model,
+                "language": "kor",
+                "text": body.text,
+                "prompt": (
+                    {"emotion_preset": "normal", "emotion_intensity": 1}
+                    if settings.typecast_model == "ssfm-v21"
+                    else {"emotion_type": "smart"}
+                ),
+                "output": {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0},
+            },
+        )
+        with anyio.fail_after(max(0, min(15, end_time - anyio.current_time()))):
+            upstream = await client.send(request, stream=True)
+        if not upstream.is_success:
+            raise APIError(502, "TTS_FAILED", "Speech synthesis failed.")
+
+        async def chunks():
+            iterator = upstream.aiter_bytes()
+            try:
+                while True:
+                    remaining = end_time - anyio.current_time()
+                    with anyio.fail_after(max(0, remaining)):
+                        chunk = await iterator.__anext__()
+                    yield chunk
+            except StopAsyncIteration:
+                pass
+            finally:
+                await cleanup()
+
+        forwarded = True
+        return StreamingResponse(
+            chunks(), media_type=upstream.headers.get("content-type", "application/octet-stream"),
+            headers={"Cache-Control": "no-store"}, background=BackgroundTask(cleanup),
+        )
+    except (httpx.TimeoutException, TimeoutError) as exc:
+        raise APIError(504, "TTS_TIMEOUT", "Speech synthesis timed out.") from exc
+    except httpx.RequestError as exc:
+        raise APIError(502, "TTS_FAILED", "Speech synthesis failed.") from exc
+    finally:
+        if not forwarded:
+            await cleanup()

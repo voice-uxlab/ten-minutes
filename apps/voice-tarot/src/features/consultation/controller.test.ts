@@ -6,12 +6,14 @@ import { ReadingStore } from "../../../server/reading-store.ts";
 import { cards } from "../../../shared/cards.ts";
 import { Consultation, type RealtimeEvent } from "./controller";
 import { emptyReading, type Session } from "@/api/types";
-import { profile, saveProfile, loadSession } from "@/lib/storage";
+import { loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
 const audioMock = vi.hoisted(() => ({
   busy: false,
-  state: (_busy: boolean) => { void _busy; },
-  appended: [] as Array<[string, boolean | undefined]>,
+  state: (_busy: boolean) => {
+    void _busy;
+  },
+  appended: [] as Array<[string, string]>,
   playback: (_text: string) => {
     void _text;
   },
@@ -19,17 +21,21 @@ const audioMock = vi.hoisted(() => ({
 vi.mock("./speech.ts", () => ({
   displaySpeech: (s: string) => s,
   SpeechPlayer: class {
-    get busy() { return audioMock.busy; }
+    get busy() {
+      return audioMock.busy;
+    }
     constructor(
       _context: unknown,
-      options: { onPlaybackStart: (text: string) => void; onState: (busy: boolean) => void },
+      options: {
+        onPlaybackStart: (text: string) => void;
+        onState: (busy: boolean) => void;
+      },
     ) {
       audioMock.playback = options.onPlaybackStart;
       audioMock.state = options.onState;
     }
-    async connect() {}
-    append(text: string, flush?: boolean) {
-      audioMock.appended.push([text, flush]);
+    append(text: string, responseId: string) {
+      audioMock.appended.push([text, responseId]);
     }
     cancel() {}
     close() {}
@@ -37,6 +43,9 @@ vi.mock("./speech.ts", () => ({
 }));
 let dir: string, store: ReadingStore, controller: Consultation;
 let mutations: Record<string, number>;
+let storeId: string;
+const consultationId = "12345678-1234-4321-8123-123456789abc";
+const pathPrefix = `/api/v1/consultations/${consultationId}`;
 const sends: Record<string, unknown>[] = [];
 class Peer {
   localDescription = { sdp: "offer" };
@@ -65,6 +74,7 @@ class Peer {
 }
 beforeEach(async () => {
   localStorage.clear();
+  sessionStorage.clear();
   queryClient.clear();
   sends.length = 0;
   audioMock.appended = [];
@@ -77,18 +87,63 @@ beforeEach(async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
-      if (path === "/test-logs")
-        return Response.json({ path: ".test-logs/test.md" });
-      if (path === "/session") return Response.json({ value: "test-token" });
-      if (path.startsWith("https://api.openai.com/"))
+      if (path === `${pathPrefix}/realtime-connection`)
         return new Response("answer");
-      const body = JSON.parse(String(options?.body));
-      mutations[body.action] = (mutations[body.action] || 0) + 1;
-      try {
-        return Response.json(await store.request(body));
-      } catch (e) {
-        return Response.json({ error: String(e) }, { status: 400 });
+      if (path === `${pathPrefix}/card-selection`) {
+        mutations.confirm_cards = (mutations.confirm_cards || 0) + 1;
+        const body = JSON.parse(String(options?.body));
+        await store.request({
+          id: storeId,
+          action: "review_question",
+          args: {
+            question: body.question,
+            spreadId: body.spread_type.toLowerCase(),
+          },
+        });
+        await store.request({ id: storeId, action: "confirm_question" });
+        await store.request({
+          id: storeId,
+          action: "select_numbers",
+          args: { picks: body.picks },
+        });
+        const selected = await store.request({
+          id: storeId,
+          action: "confirm_cards",
+        });
+        if (selected.result.error) throw Error(selected.result.error);
+        return Response.json({
+          cards: selected.state.cards.map((c) => ({
+            slot: c.slot,
+            picked_number: c.number,
+            position: c.position,
+            revealed: false,
+            card_id: null,
+            name: null,
+            keywords: null,
+          })),
+        });
       }
+      const reveal = path.match(/\/cards\/([1-3])\/reveal$/);
+      if (reveal) {
+        mutations.reveal_card = (mutations.reveal_card || 0) + 1;
+        const slot = Number(reveal[1]);
+        const { state } = await store.request({ id: storeId, action: "get" });
+        const card = state.cards[slot - 1];
+        return Response.json({
+          card: {
+            slot,
+            picked_number: card.number,
+            position: card.position,
+            revealed: true,
+            card_id: card.id,
+            name: card.name,
+            keywords: [card.upright],
+          },
+        });
+      }
+      if (path === `${pathPrefix}/end` || path === `${pathPrefix}/report`)
+        return Response.json({});
+      throw Error(`Unexpected request: ${path}`);
     }),
   );
 });
@@ -97,22 +152,43 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await rm(dir, { recursive: true, force: true });
 });
-async function session(demo = true) {
+async function session() {
   const created = await store.request({
     id: undefined,
     action: "create",
     masterId: "adaptive",
     previous: undefined,
   });
+  storeId = created.id;
   return {
     ...emptyReading,
     ...created.state,
-    readingId: created.id,
-    demo,
+    readingId: consultationId,
+    endAt: Date.now() + 600000,
+    demo: false,
     date: new Date().toISOString(),
     notes: [],
     transcript: [],
   } as Session;
+}
+function mockRealtime() {
+  vi.stubGlobal(
+    "AudioContext",
+    class {
+      destination = {};
+      async resume() {}
+      async close() {}
+    },
+  );
+  vi.stubGlobal("RTCPeerConnection", Peer);
+  vi.stubGlobal("navigator", {
+    mediaDevices: {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {}, enabled: true }],
+        getAudioTracks: () => [{ stop() {}, enabled: true }],
+      }),
+    },
+  });
 }
 async function emit(name: string, args: unknown, id: string) {
   await controller.event({ type: "response.created", response: { id } });
@@ -134,7 +210,6 @@ async function emit(name: string, args: unknown, id: string) {
 }
 test("partial picks, same-card confirmation, sequential three-card reading, flow notes and reload report", async () => {
   controller = new Consultation(await session());
-  await controller.start();
   expect(controller.getSnapshot().session.cards).toHaveLength(0);
   await controller.command("review_question", {
     question: "이직할까 남을까?",
@@ -145,22 +220,47 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   await controller.command("select_numbers", { picks: [7, 22] });
   expect(controller.getSnapshot().heading).toContain("1개만 더");
   expect(controller.getSnapshot().session.cards).toHaveLength(0);
+  await controller.command("select_numbers", { picks: [79] });
+  expect(controller.getSnapshot().retryNumbers).toBe(true);
+  expect(controller.getSnapshot().session.picks).toEqual([7, 22]);
   await controller.command("select_numbers", { picks: [22, 51] });
+  expect(controller.getSnapshot().retryNumbers).toBe(false);
   expect(controller.getSnapshot().session.picks).toEqual([7, 22, 51]);
   await controller.command("confirm_cards");
-  const chosen = structuredClone(controller.getSnapshot().session.cards);
+  const chosen = controller
+    .getSnapshot()
+    .session.cards.map((card) => card.number);
   await controller.command("confirm_cards");
-  expect(controller.getSnapshot().session.cards).toEqual(chosen);
+  expect(
+    controller.getSnapshot().session.cards.map((card) => card.number),
+  ).toEqual(chosen);
   for (let slot = 1; slot <= 3; slot++) {
     await controller.command("reveal_card", { slot });
     await controller.command("show_reading", { slot });
     expect(controller.getSnapshot().active).toEqual([slot]);
   }
   await controller.command("show_reading", { slot: 0 });
-  expect((await controller.command("request_clarifier", {slot: 2, question: "more"})).error).toBeTruthy();
-  expect(controller.getSnapshot().session.cards).toEqual(chosen);
+  expect(
+    (
+      await controller.command("request_clarifier", {
+        slot: 2,
+        question: "more",
+      })
+    ).error,
+  ).toBeTruthy();
+  expect(
+    controller.getSnapshot().session.cards.map((card) => card.number),
+  ).toEqual(chosen);
   await controller.end();
-  const saved = loadSession(controller.getSnapshot().session.readingId)!;
+  const saved = controller.getSnapshot().session;
+  expect(loadSession(consultationId)).toBeUndefined();
+  const reportRequest = vi
+    .mocked(fetch)
+    .mock.calls.find(
+      ([path, options]) =>
+        path === `${pathPrefix}/report` && options?.method === "PUT",
+    );
+  expect(JSON.parse(String(reportRequest?.[1]?.body)).readings).toHaveLength(3);
   expect(saved.ended).toBe(true);
   expect(saved.cards).toHaveLength(3);
   expect(saved.notes.some((n) => n.stageLabel === "종합과 다음 행동")).toBe(
@@ -168,28 +268,11 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   );
   expect(saved.report?.readings).toHaveLength(3);
 });
-test("live duplicate tool events mutate once; remount reconnect does not charge a second ticket", async () => {
-  vi.stubGlobal(
-    "AudioContext",
-    class {
-      destination = {};
-      async resume() {}
-      async close() {}
-    },
-  );
-  vi.stubGlobal("RTCPeerConnection", Peer);
-  vi.stubGlobal("navigator", {
-    mediaDevices: {
-      getUserMedia: async () => ({
-        getTracks: () => [{ stop() {}, enabled: true }],
-        getAudioTracks: () => [{ stop() {}, enabled: true }],
-      }),
-    },
-  });
-  saveProfile({ ...profile(), freeUsed: true, tickets: 2 });
-  controller = new Consultation(await session(false));
+test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
   await controller.start();
-  expect(profile().tickets).toBe(1);
+  const deadline = controller.getSnapshot().session.endAt;
   await controller.event({
     type: "response.created",
     response: { id: "spoken" },
@@ -206,7 +289,7 @@ test("live duplicate tool events mutate once; remount reconnect does not charge 
     response_id: "spoken",
     delta: "살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended).toEqual([["카드의 상징을 살펴볼게.", true]]);
+  expect(audioMock.appended).toEqual([["카드의 상징을 살펴볼게.", "spoken"]]);
   expect(controller.getSnapshot().caption).toBe("");
   audioMock.playback("카드의 상징을 살펴볼게.");
   expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게.");
@@ -215,13 +298,13 @@ test("live duplicate tool events mutate once; remount reconnect does not charge 
     response_id: "spoken",
     text: "카드의 상징을 살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended.at(-1)).toEqual([" 마지막 말", true]);
+  expect(audioMock.appended.at(-1)).toEqual([" 마지막 말", "spoken"]);
   await emit(
     "review_question",
     { question: "오늘 주목할 점?", spreadId: "situation" },
     "one",
   );
-  expect(mutations.review_question).toBe(1);
+
   expect(
     sends.filter(
       (e) => (e.item as { call_id?: string })?.call_id === "call-one",
@@ -245,51 +328,212 @@ test("live duplicate tool events mutate once; remount reconnect does not charge 
   controller.dispose();
   controller = new Consultation(loadSession(id)!);
   await controller.start();
-  expect(profile().tickets).toBe(1);
+  expect(controller.getSnapshot().session.endAt).toBe(deadline);
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.filter(
+        ([path]) => path === `${pathPrefix}/realtime-connection`,
+      )
+      .map(([, options]) => JSON.parse(String(options?.body)).sdp),
+  ).toEqual(["offer", "offer"]);
   expect(controller.getSnapshot().session.picks).toEqual([7]);
   expect(controller.getSnapshot().phase).toBe("picking");
   // Continue exclusively through model tool events, with no UI interactions.
   const caption = controller.getSnapshot().caption;
-  await emit("select_numbers", {picks: [22,51]}, "remaining");
+  await emit("select_numbers", { picks: [22, 51] }, "remaining");
   await emit("confirm_cards", {}, "four");
   await emit("reveal_card", { slot: 1 }, "five");
   await emit("show_reading", { slot: 1 }, "six");
-  expect((await controller.command("reveal_card", {slot:2})).error).toBeTruthy();
-  for (const slot of [2,3]) {
+  expect(
+    (await controller.command("reveal_card", { slot: 2 })).error,
+  ).toBeTruthy();
+  for (const slot of [2, 3]) {
     audioMock.playback("카드 해석.");
     audioMock.busy = true;
     let settled = false;
-    const advancing = emit("reveal_card", {slot}, `reveal-${slot}`).then(() => { settled = true; });
-    const responseCount = sends.filter(e => e.type === "response.create").length;
-    await new Promise(resolve => setTimeout(resolve, 100));
+    const advancing = emit("reveal_card", { slot }, `reveal-${slot}`).then(
+      () => {
+        settled = true;
+      },
+    );
+    const responseCount = sends.filter(
+      (e) => e.type === "response.create",
+    ).length;
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(settled).toBe(false);
     expect(controller.getSnapshot().session.revealed).not.toContain(slot);
-    expect(sends.filter(e => e.type === "response.create")).toHaveLength(responseCount);
+    expect(sends.filter((e) => e.type === "response.create")).toHaveLength(
+      responseCount,
+    );
     audioMock.busy = false;
     audioMock.state(false);
     await advancing;
     expect(controller.getSnapshot().session.revealed).not.toContain(slot);
-    expect(sends.filter(e => e.type === "response.create")).toHaveLength(responseCount);
+    expect(sends.filter((e) => e.type === "response.create")).toHaveLength(
+      responseCount,
+    );
     const afterAdvance = sends.length;
-    await new Promise(resolve => setTimeout(resolve, 750));
+    await new Promise((resolve) => setTimeout(resolve, 750));
     expect(sends).toHaveLength(afterAdvance); // idle callback must not start a second continuation
-    await controller.event({type: "input_audio_buffer.speech_started", item_id: `feedback-${slot-1}`});
-    await emit("reveal_card", {slot}, `after-feedback-${slot}`);
+    await controller.event({
+      type: "input_audio_buffer.speech_started",
+      item_id: `feedback-${slot - 1}`,
+    });
+    await emit("reveal_card", { slot }, `after-feedback-${slot}`);
     expect(controller.getSnapshot().session.revealed).toContain(slot);
-    await emit("show_reading", {slot}, `read-${slot}`);
+    await emit("show_reading", { slot }, `read-${slot}`);
   }
   audioMock.playback("세 번째 카드 해석.");
-  expect((await controller.command("show_reading", {slot:0})).awaitingUser).toBe(true);
-  await controller.event({type: "input_audio_buffer.speech_started", item_id: "feedback-3"});
+  expect(
+    (await controller.command("show_reading", { slot: 0 })).awaitingUser,
+  ).toBe(true);
+  await controller.event({
+    type: "input_audio_buffer.speech_started",
+    item_id: "feedback-3",
+  });
   await emit("show_reading", { slot: 0 }, "seven");
   expect(controller.getSnapshot().session.summaryVisited).toBe(true);
-  expect(controller.getSnapshot().session.revealed).toEqual([1,2,3]);
+  expect(controller.getSnapshot().session.revealed).toEqual([1, 2, 3]);
   expect(controller.getSnapshot().caption).toContain(caption);
   expect(mutations.confirm_cards).toBe(1);
   audioMock.busy = true;
   const reveals = mutations.reveal_card;
-  const pendingReveal = controller.command("reveal_card", {slot: 2});
+  const pendingReveal = controller.command("reveal_card", { slot: 2 });
   controller.dispose();
   expect((await pendingReveal).error).toBeTruthy();
   expect(mutations.reveal_card).toBe(reveals);
+});
+
+test.each([
+  [
+    "카드 설명을 인용한 경우",
+    "소드 6이 떴어. 어떤 느낌이 들어?",
+    "상담 내용을 요약하지 못했어.",
+  ],
+  [
+    "새로 요약한 경우",
+    "일을 계속할지, 다른 방향을 준비할지 고민하고 있어.",
+    "일을 계속할지, 다른 방향을 준비할지 고민하고 있어.",
+  ],
+  ["요약 요청이 거절된 경우", null, "상담 내용을 요약하지 못했어."],
+])(
+  "저장 리포트에 대화 원문을 옮기지 않는다 — %s",
+  async (_, summary, expected) => {
+    mockRealtime();
+    controller = new Consultation({
+      ...(await session()),
+      question: "지금 일을 계속할까?",
+      transcript: ["레나: 소드 6이 떴어. 어떤 느낌이 들어?"],
+    });
+    await controller.start();
+
+    const ending = controller.end();
+    const report = await vi.waitFor(() => {
+      const request = sends.find(
+        (event) => event.event_id === `report-${consultationId}`,
+      );
+      expect(request).toBeDefined();
+      return request!;
+    });
+    expect(report.response).toMatchObject({
+      conversation: "none",
+      tool_choice: { type: "function", name: "write_report" },
+      input: [{ role: "user", content: [{ type: "input_text" }] }],
+    });
+    if (summary === null) {
+      await controller.event({
+        type: "error",
+        error: {
+          event_id: String(report.event_id),
+          code: "invalid_request_error",
+        },
+      });
+    } else {
+      await controller.event({
+        type: "response.done",
+        response: {
+          id: "report-response",
+          metadata: { purpose: "report" },
+          status: "completed",
+          output: [
+            {
+              type: summary === expected ? "message" : "function_call",
+              name: "write_report",
+              call_id: "report-call",
+              arguments:
+                summary === expected ? "" : JSON.stringify({ summary }),
+              content: [{ text: JSON.stringify({ summary }) }],
+            },
+          ],
+        },
+      });
+    }
+    await ending;
+    const saved = vi
+      .mocked(fetch)
+      .mock.calls.find(([path]) => path === `${pathPrefix}/report`);
+    expect(JSON.parse(String(saved?.[1]?.body)).situation_summary).toBe(
+      expected,
+    );
+  },
+);
+
+test("renews the current voice connection and stops heartbeats on dispose", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
+  const token = "a".repeat(64);
+  const heartbeat = vi.fn();
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (path, options) => {
+    if (path === `${pathPrefix}/realtime-connection`) {
+      return new Response("answer", {
+        headers: { "X-Voice-Connection": token },
+      });
+    }
+    if (path === `${pathPrefix}/voice-heartbeat`) {
+      heartbeat(JSON.parse(String(options?.body)));
+      return new Response(null, { status: 204 });
+    }
+    return originalFetch(path, options);
+  });
+
+  vi.useFakeTimers();
+  try {
+    await controller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heartbeat).toHaveBeenCalledExactlyOnceWith({
+      connection_token: token,
+    });
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    controller.dispose();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("requests a wrap-up at nine minutes and ends at the original deadline", async () => {
+  mockRealtime();
+  const reading = await session();
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(reading.endAt! - 600000);
+    controller = new Consultation(reading);
+    await controller.start();
+    const warnings = () => sends.filter((event) => JSON.stringify(event).includes("1분 남았어"));
+    await vi.advanceTimersByTimeAsync(539999);
+    expect(warnings()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(warnings()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(warnings()).toHaveLength(1);
+    const endings = vi.mocked(fetch).mock.calls.filter(([path]) => path === `${pathPrefix}/end`);
+    expect(endings).toHaveLength(1);
+    expect(JSON.parse(String(endings[0][1]?.body))).toEqual({ reason: "TIMEOUT" });
+  } finally {
+    vi.useRealTimers();
+  }
 });

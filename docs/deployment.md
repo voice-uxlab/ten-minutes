@@ -29,7 +29,7 @@ VITE_AUTH_API_ORIGIN=https://ten-minutes-api-git-dev-voice-uxlab.vercel.app
 VITE_AUTH_CONSENT_VERSION=2026-11-v1
 ```
 
-`VITE_AUTH_API_ORIGIN`은 FastAPI 백엔드의 Preview origin입니다.
+`VITE_AUTH_API_ORIGIN`은 로그인과 상담 요청에 공통으로 사용하는 FastAPI 백엔드의 Preview origin입니다.
 
 `VITE_AUTH_CONSENT_VERSION`은 사용자가 동의한 AI 처리 안내 문구의 버전을 식별하기 위한 값입니다. 예를 들어 `2026-11-v1`, `2026-11-v2`와 같은 형식으로 관리합니다. 음성 전송, AI 답변 처리 등 관련 동의 문구가 변경되면 새로운 버전으로 변경해야 합니다.
 
@@ -152,3 +152,34 @@ PUBLIC_WEB_ORIGIN=https://ten-minutes-dev.vercel.app
 - [ ] 프론트엔드에서 로그인 및 회원 온보딩 확인
 - [ ] 동의 버전 저장 및 상담 생성 검증 확인
 - [ ] Preview Protection 상태에서 전체 흐름 확인
+
+
+## 음성 상담 배포
+
+배포 전에 FastAPI Vercel 프로젝트에 `OPENAI_REALTIME_PROMPT_ID`와
+`OPENAI_REALTIME_PROMPT_VERSION`을 [백엔드 환경 설정](../backend/README.md)에 맞춰 등록합니다.
+같은 환경의 `OPENAI_API_KEY`로 지정한 버전에 접근할 수 있어야 합니다. 배포 후 테스트 계정으로
+새 상담을 열어 SDP 연결과 레나의 첫 응답을 확인하고, 번호 일부 선택 및 정정, 3장 확정·순차 공개,
+재연결과 종료 후 리포트를 확인합니다. 연결 이벤트에서 모델, 텍스트 출력, VAD, 도구 목록이
+기대와 일치하는지 보되, 프롬프트 본문이나 상담 내용을 로그에 남기지 않습니다.
+
+
+배포 대상 DB의 마이그레이션 이력을 확인한 뒤 `20261125_0007`까지 적용합니다.
+음성 상담 종료 요청이 OpenAI 연결을 닫고 DB에 종료를 기록하는지 확인합니다.
+연결이 살아 있는 동안 브라우저가 약 30초마다 인증된 유지 신호를 보냅니다. 신호가
+2분 이상 끊기면 DB가 다음 1분 점검에서 FastAPI에 종료를 요청합니다. 한 번에 최대
+6개의 만료 연결을 확인하며, OpenAI 요청에 실패한 연결은 다음 점검의 대상에 남습니다.
+상담 생성 9분 후 레나에게 마무리를 요청하고 10분에 브라우저가 통화를 종료합니다. 서버도 같은 만료 시각부터 재연결과 추가 합성을 거절하며, 남은 연결은 다음 예약 점검에서 종료합니다. 연결만 정리하고 리포트는 자동 생성하지 않습니다.
+
+같은 Supabase DB에 다음 설정을 적용합니다.
+
+1. Vercel 백엔드에 무작위 토큰을 `VOICE_CLEANUP_SECRET`으로 설정합니다.
+2. 동일한 토큰은 Supabase Vault의 `voice_cleanup_secret`에, 해당 환경의 HTTPS 백엔드
+   주소는 `voice_cleanup_backend_origin`에 저장합니다. Vercel 배포 보호가 있다면
+   Vault의 `voice_cleanup_vercel_bypass`에 해당 프로젝트의 자동화용 키도 설정합니다.
+3. 이 버전의 프론트와 백엔드를 배포한 뒤 DB 관리자 권한으로
+   [예약 작업 SQL](../backend/sql/supabase_voice_cleanup.sql)을 적용합니다. 기존 버전에서
+   열어 둔 연결은 배포 직후 바로 끊기지 않도록 2분의 유예를 둡니다.
+4. 테스트 통화에서 브라우저를 강제 종료하고, 다음 점검 후 `realtime_calls.closed_at`이
+   기록되는지 확인합니다. Supabase Cron 실행 이력은 HTTP 요청을 등록했는지 보여주므로,
+   FastAPI 응답이나 DB의 종료 기록까지 확인합니다.

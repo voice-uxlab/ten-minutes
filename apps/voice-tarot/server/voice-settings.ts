@@ -20,10 +20,6 @@ export const defaults: VoiceSettings = {
   silence: null,
   loudness: null,
 };
-let applied: VoiceSettings | null = null;
-export function currentVoiceSettings() {
-  return applied;
-}
 export function validateVoiceSettings(input: unknown): VoiceSettings {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw Error("설정 형식이 잘못됐어요.");
@@ -77,10 +73,6 @@ export function validateVoiceSettings(input: unknown): VoiceSettings {
   )
     throw Error("v21은 일반·기쁨·슬픔·화남 프리셋만 지원해요.");
   return s;
-}
-export function applyVoiceSettings(input: unknown) {
-  applied = validateVoiceSettings(input);
-  return applied;
 }
 export function typecastOptions(
   settings: Partial<VoiceSettings> = {},

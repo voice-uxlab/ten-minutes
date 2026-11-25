@@ -72,7 +72,7 @@
 
 ## 4. 소셜 로그인 처리
 
-`provider` 허용값은 `kakao`, `naver`, `openai`다. FE는 로그인 버튼 클릭 시 Provider API를 직접 호출하지 않고 브라우저를 `/auth/{provider}/authorize`로 이동시킨다.
+`provider` 허용값은 `kakao`다. FE는 로그인 버튼 클릭 시 Provider API를 직접 호출하지 않고 브라우저를 `/auth/{provider}/authorize`로 이동시킨다.
 
 1. 백엔드가 `state`, Provider별 PKCE verifier와 nonce를 만든다.
 2. 브라우저를 Provider 인가 화면으로 redirect한다.

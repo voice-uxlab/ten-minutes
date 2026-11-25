@@ -1,53 +1,44 @@
 import { memo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import type { Card } from "@/api/types";
+import { cardImage } from "./card-image";
 type DisplayCard = Pick<Card, "number" | "slot" | "position"> & Partial<Card>;
-const art: Record<string, string> = {
-  별: "star",
-  태양: "sun",
-  절제: "temperance",
-};
+const cardBack = "/assets/metallic/metallic-card-back.png";
 const TarotCard = memo(function TarotCard({
   card,
   open,
   active,
+  hidden,
 }: {
   card: DisplayCard;
   open: boolean;
   active: boolean;
+  hidden: boolean;
 }) {
   const reduced = useReducedMotion();
+  const image = open ? cardImage(card.id) : cardBack;
   return (
-    <div className={"card-wrap" + (active ? " active" : "")}>
+    <div className={"card-wrap" + (active ? " active" : "")} hidden={hidden}>
       <motion.div
-        className={
-          "card" + (open ? (card.reversed ? " reversed" : "") : " back")
-        }
+        className="tarot-card-face"
         initial={false}
         animate={{ rotateY: open ? 0 : 180 }}
         transition={{ duration: reduced ? 0 : 0.35 }}
       >
-        {open ? (
-          <>
-            <span className="arcana">TAROT</span>
-            {art[card.name || ""] ? (
-              <img
-                className="symbol"
-                src={`/assets/${art[card.name!]}.png`}
-                alt={card.name}
-              />
-            ) : (
-              <span className="symbol">✦</span>
-            )}
-            <span className="english">{card.position}</span>
-            <b>{card.name}</b>
-          </>
-        ) : (
+        {image ? (
           <img
-            style={{ transform: "rotateY(180deg)" }}
-            src="/assets/card-back.png"
-            alt="아직 공개하지 않은 타로 카드"
+            className={
+              open
+                ? card.reversed
+                  ? "tarot-card-reversed"
+                  : undefined
+                : "tarot-card-back"
+            }
+            src={image}
+            alt={open ? card.name : "아직 공개하지 않은 타로 카드"}
           />
+        ) : (
+          <span>{card.name}</span>
         )}
       </motion.div>
       <span>
@@ -62,21 +53,36 @@ export function Cards({
   cards,
   revealed,
   active = [],
+  pending = 0,
+  focus,
 }: {
   cards: DisplayCard[];
   revealed: number[];
   active?: number[];
+  pending?: number;
+  focus?: number;
 }) {
-  if (!cards.length) return null;
+  if (!cards.length && !pending) return null;
   return (
-    <div className="slots" data-count={cards.length}>
+    <div
+      className="slots"
+      data-count={focus ? 1 : cards.length + pending}
+      data-focused={focus ? true : undefined}
+    >
       {cards.map((card) => (
         <TarotCard
           key={card.number}
           card={card}
           open={revealed.includes(card.slot)}
           active={active.includes(card.slot)}
+          hidden={focus !== undefined && focus !== card.slot}
         />
+      ))}
+      {Array.from({ length: pending }, (_, index) => (
+        <div className="card-placeholder" key={index}>
+          <img src={cardBack} alt="" />
+          <small>PICK {cards.length + index + 1}</small>
+        </div>
       ))}
     </div>
   );

@@ -263,13 +263,13 @@ def test_oauth_authorize_returns_503_when_provider_is_not_configured(db_session)
     from app.main import app
 
     settings = Settings(
-        naver_client_id=None,
+        kakao_client_id=None,
         database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
     )
     app.dependency_overrides[get_settings] = lambda: settings
     try:
         with TestClient(app, follow_redirects=False) as client:
-            response = client.get("/auth/naver/authorize")
+            response = client.get("/auth/kakao/authorize")
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
@@ -288,7 +288,7 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(
 
     settings = Settings(
         public_web_origin="https://web.example.com/",
-        naver_client_id="test-client-id",
+        kakao_client_id="test-client-id",
         database_url="postgresql+psycopg://postgres:postgres@localhost:5432/ten_minutes_test",
     )
 
@@ -299,7 +299,7 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(
     app.dependency_overrides[get_settings] = lambda: settings
     try:
         with TestClient(app, follow_redirects=False) as client:
-            response = client.get("/auth/naver/authorize")
+            response = client.get("/auth/kakao/authorize")
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
@@ -466,3 +466,342 @@ def test_unhandled_error_response_hides_internal_exception_details():
         }
     }
     assert b"database-password" not in response.body
+
+
+def test_voice_connection_requires_pinned_prompt(authenticated_client, db_session, monkeypatch):
+    from unittest.mock import Mock
+
+    import httpx
+
+    from app.config import get_settings
+    from app.models import Consultation
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    for field in ("openai_api_key", "typecast_api_key", "typecast_voice_id"):
+        monkeypatch.setattr(settings, field, "test")
+    consultation = create_consultation(client)
+    upstream = Mock(side_effect=AssertionError("must not contact OpenAI"))
+    monkeypatch.setattr(httpx.Client, "post", upstream)
+
+    for prompt_id, prompt_version in (("", "5"), ("pmpt_test", ""), ("pmpt_test", "latest")):
+        monkeypatch.setattr(settings, "openai_realtime_prompt_id", prompt_id)
+        monkeypatch.setattr(settings, "openai_realtime_prompt_version", prompt_version)
+        response = client.request(
+            "POST", f"/api/v1/consultations/{consultation['id']}/realtime-connection",
+            json={"sdp": "v=0\r\noffer"},
+        )
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "REALTIME_PROMPT_NOT_CONFIGURED"
+
+    assert db_session.get(Consultation, consultation["id"]).voice_connection_attempts == 0
+    upstream.assert_not_called()
+
+
+def test_voice_connection_and_typecast_limits(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
+    import json
+
+    import httpx
+
+    from app.config import get_settings
+    from app.models import RealtimeCall
+    from app.voice import TOOLS
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    for field, value in {
+        "openai_api_key": "test-openai-key",
+        "typecast_api_key": "test-typecast-key",
+        "typecast_voice_id": "test-voice",
+        "typecast_model": "ssfm-v30",
+        "voice_connections_per_consultation": 2,
+        "voice_connections_per_account_day": 2,
+        "tts_characters_per_consultation": 10,
+        "tts_characters_per_account_day": 12,
+        "tts_parallel_requests": 1,
+    }.items():
+        monkeypatch.setattr(settings, field, value)
+    calls = []
+    tts = []
+    def provider_response(self, url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/hangup"):
+            return httpx.Response(200)
+        return httpx.Response(
+            201, text="v=0\r\nanswer",
+            headers={"Location": f"/v1/realtime/calls/rtc_test_{len(calls)}"},
+        )
+
+    async def tts_response(self, request, **kwargs):
+        tts.append(json.loads(request.content))
+        return httpx.Response(200, content=b"wav-test", headers={"content-type": "audio/wav"})
+
+    monkeypatch.setattr(httpx.Client, "post", provider_response)
+    # Only the voice provider uses HTTPX Client.post here, so use request() for TestClient POSTs.
+    monkeypatch.setattr(httpx.AsyncClient, "send", tts_response)
+    consultation = client.request("POST", "/api/v1/consultations", json={"consent_version": "2026-11"}).json()
+    path = f"/api/v1/consultations/{consultation['id']}"
+    offer = {"sdp": "v=0\r\noffer"}
+    connection = f"{path}/realtime-connection"
+    speech = {"text": "첫 인사", "response_id": "resp_test", "segment_index": 0}
+    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 409
+    assert calls == []
+
+    answer = client.request("POST", connection, json=offer)
+    assert answer.status_code == 201 and answer.text == "v=0\r\nanswer"
+    assert answer.headers["cache-control"] == "no-store"
+    model_config = json.loads(calls[0][1]["files"]["session"][1])
+    assert calls[0][0] == "https://api.openai.com/v1/realtime/calls"
+    assert calls[0][1]["files"]["sdp"] == (None, offer["sdp"], "application/sdp")
+    assert model_config == {
+        "type": "realtime",
+        "model": settings.openai_realtime_model,
+        "prompt": hosted_realtime_prompt,
+        "tools": TOOLS,
+        "tool_choice": "auto",
+        "output_modalities": ["text"],
+        "audio": {"input": {
+            "turn_detection": {"type": "semantic_vad", "eagerness": "medium"},
+            "transcription": {"model": "gpt-4o-mini-transcribe", "language": "ko"},
+        }},
+    }
+
+    assert client.request("POST", connection, json=offer).status_code == 201
+    assert calls[1][0].endswith("/rtc_test_1/hangup")
+    assert client.get(path).json()["call_ends_at"] == consultation["call_ends_at"]
+    assert client.request("POST", connection, json=offer).status_code == 429
+
+    audio = client.request("POST", f"{path}/tts/stream", json=speech)
+    assert audio.status_code == 200 and audio.content == b"wav-test"
+    assert tts[0]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
+    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 200
+    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 429
+    assert len(tts) == 2
+
+    ended = client.request("POST", f"{path}/end", json={"reason": "USER"})
+    assert ended.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(RealtimeCall, "rtc_test_3").closed_at is not None
+    assert client.request("POST", connection, json=offer).status_code == 409
+
+
+def test_replace_active_voice_only_connects_after_confirmed_hangup(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+    import httpx
+    from app.config import get_settings
+    from app.models import Consultation, RealtimeCall
+
+    client, _ = authenticated_client
+    for field in ("openai_api_key", "typecast_api_key", "typecast_voice_id"):
+        monkeypatch.setattr(get_settings(), field, "test")
+    old, new = [create_consultation(client)["id"] for _ in range(2)]
+    def connect(cid):
+        return client.request("POST", f"/api/v1/consultations/{cid}/realtime-connection",
+                              json={"sdp": "v=0\r\noffer"})
+    def answer(cid):
+        return httpx.Response(201, text="v=0\r\nanswer", headers={"Location": f"/v1/realtime/calls/{cid}"})
+    provider = Mock(side_effect=[answer("rtc_old"), httpx.Response(502), httpx.Response(410), answer("rtc_new")])
+    monkeypatch.setattr(httpx.Client, "post", provider)
+    assert connect(old).status_code == 201
+    previous = db_session.get(Consultation, old)
+    previous.voice_reservation_until = datetime.now(timezone.utc) + timedelta(seconds=20)
+    db_session.commit()
+    assert connect(new).json()["error"]["code"] == "VOICE_CONNECTION_PENDING"
+    assert provider.call_count == 1
+    previous.voice_reservation_until = None
+    db_session.commit()
+    assert connect(new).json()["error"]["code"] == "REALTIME_HANGUP_FAILED"
+    assert db_session.get(RealtimeCall, "rtc_old").closed_at is None
+    assert connect(new).status_code == 201
+    assert [c.args[0].split("/calls")[-1] for c in provider.call_args_list] == ["", "/rtc_old/hangup", "/rtc_old/hangup", ""]
+    assert db_session.get(RealtimeCall, "rtc_old").closed_at is not None
+    assert db_session.get(RealtimeCall, "rtc_new").closed_at is None
+    assert connect(old).json()["error"]["code"] == "CONSULTATION_STATE_CONFLICT"
+
+
+def test_deadline_caps_heartbeat_and_rejects_reconnect_but_allows_hangup_retry(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+
+    import httpx
+
+    from app.config import get_settings
+    from app.models import Consultation, RealtimeCall
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    monkeypatch.setattr(settings, "app_env", "preview")
+    monkeypatch.setattr(settings, "backend_origin", "https://preview.example.com")
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(settings, "typecast_api_key", "test-key")
+    monkeypatch.setattr(settings, "typecast_voice_id", "test-voice")
+    provider = Mock(side_effect=[
+        httpx.Response(
+            201,
+            text="v=0\r\nanswer",
+            headers={"Location": "/v1/realtime/calls/rtc_local"},
+        ),
+        httpx.Response(502),
+        httpx.Response(200),
+    ])
+    monkeypatch.setattr(httpx.Client, "post", provider)
+    consultation = client.request(
+        "POST", "/api/v1/consultations", json={"consent_version": "2026-11"},
+    ).json()
+    assert datetime.fromisoformat(consultation["call_ends_at"].replace("Z", "+00:00")) - datetime.fromisoformat(consultation["created_at"].replace("Z", "+00:00")) == timedelta(minutes=10)
+
+    stored = db_session.get(Consultation, consultation["id"])
+    stored.created_at = datetime.now(timezone.utc) - timedelta(minutes=9, seconds=10)
+    db_session.commit()
+    path = f"/api/v1/consultations/{stored.id}"
+    assert client.request("POST", f"{path}/realtime-connection", json={"sdp": "v=0\r\noffer"}).status_code == 201
+    from app.voice import connection_token
+    assert client.request("POST", f"{path}/voice-heartbeat", json={"connection_token": connection_token("rtc_local")}).status_code == 204
+    from app.models import ensure_utc
+    assert ensure_utc(db_session.get(RealtimeCall, "rtc_local").hangup_at) == stored.call_ends_at
+    stored.created_at -= timedelta(minutes=1)
+    db_session.commit()
+    assert client.request("POST", f"{path}/realtime-connection", json={"sdp": "v=0\r\noffer"}).status_code == 409
+    assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 503
+    assert db_session.get(RealtimeCall, "rtc_local").closed_at is None
+    assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 200
+    assert client.request("POST", f"{path}/end", json={"reason": "USER"}).status_code == 200
+    assert provider.call_count == 3
+    assert db_session.get(RealtimeCall, "rtc_local").closed_at is not None
+    assert provider.call_args.args[0].endswith("/rtc_local/hangup")
+
+
+def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from urllib.parse import parse_qs, urlsplit
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+    from app import auth
+    from app.config import get_settings
+    from app.main import app
+    from app.models import OAuthAttempt
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "kakao_client_id", "test-kakao")
+    async def profile(provider, *args):
+        return f"{provider}-test-account", None
+    monkeypatch.setattr(auth, "exchange_profile", profile)
+    with TestClient(app) as browser, TestClient(app) as other:
+        for path in ("/auth/naver/authorize", "/auth/naver/callback?state=old&code=test"):
+            response = browser.get(path, follow_redirects=False)
+            assert response.status_code == 404
+            assert response.json()["error"]["code"] == "AUTH_PROVIDER_NOT_FOUND"
+        provider = "kakao"
+        start = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
+        state = parse_qs(urlsplit(start.headers["location"]).query)["state"][0]
+        assert "HttpOnly" in start.headers["set-cookie"] and "SameSite=lax" in start.headers["set-cookie"]
+        path = f"/auth/{provider}/callback"
+        params = {"state": state, "code": "test-code"}
+        assert other.get(path, params=params, follow_redirects=False).status_code == 400
+        cookie_name = auth.oauth_cookie_name(provider, settings)
+        binding = browser.cookies.get(cookie_name)
+        assert browser.get(path, params=params, follow_redirects=False).status_code == 302
+        assert browser.get("/api/v1/users/me").status_code == 200
+        browser.cookies.set(cookie_name, binding)
+        assert browser.get(path, params=params, follow_redirects=False).status_code == 400
+        browser.cookies.delete(cookie_name)
+
+        expired = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
+        expired_state = parse_qs(urlsplit(expired.headers["location"]).query)["state"][0]
+        attempt = db_session.scalar(select(OAuthAttempt).where(
+            OAuthAttempt.state_hash == auth.token_hash(expired_state)
+        ))
+        attempt.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db_session.commit()
+        assert browser.get(path, params={**params, "state": expired_state},
+                           follow_redirects=False).status_code == 400
+
+
+def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_client):
+    client, _ = authenticated_client
+    for revealed_slots in ([], [1]):
+        consultation = create_consultation(client)
+        path = f"/api/v1/consultations/{consultation['id']}"
+        if revealed_slots:
+            select_cards(client, consultation["id"])
+            assert client.post(f"{path}/cards/1/reveal").status_code == 200
+        assert client.post(f"{path}/end", json={"reason": "USER"}).status_code == 200
+        if revealed_slots:
+            assert client.post(f"{path}/cards/2/reveal").status_code == 409
+        body = {
+            "situation_summary": "상담을 일찍 마쳤어요.",
+            "queen_line": "다음에 이야기해요.",
+            "readings": [{"slot": slot, "text": "한 장 해석"} for slot in revealed_slots],
+        }
+        assert client.put(f"{path}/report", json=body).status_code == 201
+        assert client.put(f"{path}/report", json=body).status_code == 200
+        report = client.get(f"{path}/report").json()
+        assert [card["slot"] for card in report["cards"]] == revealed_slots
+        assert report["readings"] == body["readings"]
+
+
+def test_voice_heartbeat_and_cleanup_leave_live_calls_open(authenticated_client, db_session, monkeypatch, hosted_realtime_prompt):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+
+    import httpx
+    from fastapi.testclient import TestClient
+    from pydantic import SecretStr
+
+    from app.config import get_settings
+    from app.main import app
+    from app.models import RealtimeCall
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    for key in ("openai_api_key", "typecast_api_key", "typecast_voice_id"):
+        monkeypatch.setattr(settings, key, "test-provider")
+    monkeypatch.setattr(settings, "voice_cleanup_secret", SecretStr("test-cleanup-secret"))
+    provider = Mock(side_effect=[
+        httpx.Response(201, text="v=0\r\nanswer", headers={"Location": "/v1/realtime/calls/rtc_heartbeat"}),
+        httpx.Response(502),
+        httpx.Response(200),
+    ])
+    monkeypatch.setattr(httpx.Client, "post", provider)
+    consultation = client.request(
+        "POST", "/api/v1/consultations", json={"consent_version": "2026-11"},
+    ).json()
+    path = f"/api/v1/consultations/{consultation['id']}"
+    connection = client.request(
+        "POST", path + "/realtime-connection",
+        json={"sdp": "v=0\r\noffer"}, headers={"Origin": settings.public_web_origin},
+    )
+    assert connection.status_code == 201
+    token = connection.headers["X-Voice-Connection"]
+    assert len(token) == 64 and "rtc_heartbeat" not in token
+    assert connection.headers["access-control-expose-headers"] == "X-Voice-Connection"
+    with TestClient(app) as anonymous:
+        assert anonymous.request("POST", path + "/voice-heartbeat", json={"connection_token": token}).status_code == 401
+    assert client.request("POST", path + "/voice-heartbeat", json={"connection_token": "0" * 64}).status_code == 409
+
+    call = db_session.get(RealtimeCall, "rtc_heartbeat")
+    call.hangup_at = datetime.now(timezone.utc) + timedelta(seconds=5)
+    soon = call.hangup_at.replace(tzinfo=None)
+    db_session.commit()
+    assert client.request("POST", path + "/voice-heartbeat", json={"connection_token": token}).status_code == 204
+    db_session.refresh(call)
+    assert call.hangup_at > soon
+
+    cleanup = "/api/v1/internal/voice-cleanup"
+    assert client.request("POST", cleanup).status_code == 401
+    assert client.request("POST", cleanup, headers={"Authorization": "Bearer invalid"}).status_code == 401
+    auth = {"Authorization": "Bearer test-cleanup-secret"}
+    assert client.request("POST", cleanup, headers=auth).status_code == 204
+    assert provider.call_count == 1
+
+    call.hangup_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+    assert client.request("POST", path + "/voice-heartbeat", json={"connection_token": token}).status_code == 409
+    assert client.request("POST", cleanup, headers=auth).status_code == 503
+    assert call.closed_at is None
+    assert client.request("POST", cleanup, headers=auth).status_code == 204
+    assert call.closed_at is not None
+    assert client.request("POST", cleanup, headers=auth).status_code == 204
+    assert provider.call_count == 3

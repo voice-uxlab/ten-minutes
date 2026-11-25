@@ -392,27 +392,6 @@ small,
 .consent input {
   accent-color: var(--pink);
 }
-.consultation-options {
-  min-width: 0;
-  padding: 4px 12px 12px;
-}
-.consultation-options legend {
-  padding-inline: 4px;
-}
-.consultation-options .consent {
-  align-items: center;
-  min-height: 44px;
-  margin-top: 0;
-  font-size: 14px;
-}
-.consultation-options input[type="radio"] {
-  flex: none;
-  width: 16px;
-  height: 16px;
-}
-.consultation-options .hint {
-  margin-top: 4px;
-}
 .login-policies {
   display: flex;
   flex-wrap: wrap;
@@ -449,17 +428,6 @@ small,
 .intro > .hint {
   text-align: center;
   font-size: 11px;
-}
-.extras {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-.extras span {
-  font-size: 10px;
-  color: #ddd;
 }
 .row {
   display: flex;
@@ -625,32 +593,6 @@ label {
   padding: 9px 15px;
   background: #ffb2ce12;
 }
-details {
-  font-size: 12px;
-  color: #ddd;
-}
-summary {
-  padding: 10px 0;
-  cursor: pointer;
-}
-#grid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 6px;
-  max-height: 230px;
-  overflow: auto;
-  padding: 5px;
-}
-#grid button {
-  border: 1px solid #fff4;
-  border-radius: 8px;
-  min-height: 40px;
-  background: #fff1;
-}
-#grid button.selected {
-  background: var(--pink);
-  color: #28242a;
-}
 .action-stack {
   display: grid;
   gap: 10px;
@@ -753,17 +695,6 @@ summary {
   padding: 16px;
   font-size: 13px;
   z-index: 30;
-}
-.work-links {
-  display: flex;
-  justify-content: center;
-  gap: 24px;
-  padding: 20px;
-  font-size: 11px;
-  color: #aaa;
-}
-.work-links a:hover {
-  color: var(--pink);
 }
 dialog {
   background: #252329;
@@ -875,9 +806,6 @@ button.glass:hover {
   .page {
     min-height: max(852px, 100svh);
   }
-  .work-links {
-    padding: 14px;
-  }
   #previewBar {
     gap: 10px;
     padding: 10px;
@@ -899,15 +827,11 @@ button.glass:hover {
 h1 {
   white-space: pre-line;
 }
-.embedded-preview #previewBar,
-.embedded-preview .work-links {
+.embedded-preview #previewBar {
   display: none !important;
 }
 .embedded-preview #phone {
   margin: 0;
-}
-.preview-mode .extras {
-  display: none;
 }
 
 .slots .card-wrap {
@@ -998,24 +922,6 @@ select:focus-visible {
 }
 #clarifierPanel .wide {
   margin-top: 12px;
-}
-
-.conversation-notes {
-  border-top: 1px solid #ffffff44;
-  padding-top: 16px;
-}
-.conversation-notes summary {
-  color: var(--pink);
-  cursor: pointer;
-}
-.conversation-notes article {
-  padding: 14px 0;
-  border-bottom: 1px solid #ffffff22;
-}
-.conversation-notes p {
-  font-size: 13px;
-  overflow-wrap: anywhere;
-  margin-top: 6px;
 }
 
 .voice-waiting { display:flex; align-items:center; justify-content:center; gap:12px; min-height:64px; color:#b8a4d5; }
