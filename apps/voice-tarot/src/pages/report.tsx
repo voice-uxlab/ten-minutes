@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { authOptions } from "@/api/auth";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { loadSession, localReports } from "@/lib/storage";
-import { BrandHeader, Panel } from "@/components/tarot";
+import { BrandHeader, MetallicIcon, Panel } from "@/components/tarot";
 import { Button } from "@/components/ui/button";
 export function ReportPage() {
   const { id = "" } = useParams(),
@@ -42,9 +42,11 @@ export function ReportPage() {
           ? `공주가 고른 타로 ${s.cards.length === 3 ? "세 장" : `${s.cards.length}장`}`
           : "오늘의 상담 리포트"}
       </h1>
-      <div className="report-spread">
-        <Cards cards={s.cards} revealed={s.revealed} />
-      </div>
+      {s.cards.length > 0 && (
+        <div className="report-spread">
+          <Cards cards={s.cards} revealed={s.revealed} />
+        </div>
+      )}
       <p className="report-date">
         {new Date(s.date).toLocaleDateString("ko-KR")}
       </p>
@@ -65,8 +67,10 @@ export function ReportPage() {
         </p>
       )}
       {error ? <p role="alert">{error}</p> : null}
-      <Link to="/reports">내 리포트 목록</Link>
-      <Link to="/">처음으로</Link>
+      <nav className="report-nav" aria-label="리포트 화면 이동">
+        <Link to="/reports">내 리포트 목록</Link>
+        <Link to="/">처음으로</Link>
+      </nav>
     </section>
   );
 }
@@ -86,7 +90,7 @@ export function ReportsPage() {
     <section className="page metallic-page reports-page">
       <BrandHeader>
         <Link to="/" className="round-action glass" aria-label="내 리포트 닫기">
-          ×
+          <MetallicIcon name="close" />
         </Link>
       </BrandHeader>
       <h1>내 리포트</h1>
@@ -126,7 +130,6 @@ export function ChristmasInvite() {
       <p className="invite-kicker glass">친구가 보낸 크리스마스 타로</p>
       <h1>
         이번 크리스마스,
-        <br />
         <em>나는 혼자일까?</em>
       </h1>
       <p>연말의 내 옆자리, 카드로 먼저 만나봐.</p>
@@ -145,7 +148,7 @@ export function ChristmasInvite() {
         />
         <img
           className="invite-heart-right"
-          src="/assets/metallic/christmas-heart-right.png"
+          src="/assets/metallic/chrome-heart.png"
           alt=""
           width="45"
           height="45"
@@ -158,10 +161,11 @@ export function ChristmasInvite() {
           height="64"
         />
       </div>
-      <Panel title="MESSAGE">
+      <Panel title="MESSAGE" icon="flower" endIcon="flower">
         <h2>10분, 내 이야기로 보는 타로</h2>
         <p>
-          카드를 한 장씩 뽑으며, 타로 언니에게 내 상황에 맞는 연애운을 들어봐.
+          카드를 한 장씩 뽑으며, 타로 언니에게
+          <br />내 상황에 맞는 연애운을 들어봐.
         </p>
       </Panel>
       <Button size="wide" asChild>

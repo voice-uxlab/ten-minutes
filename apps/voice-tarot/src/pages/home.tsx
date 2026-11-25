@@ -18,7 +18,7 @@ import { saveSession } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PolicyDialog } from "@/components/ui/dialog";
-import { BrandHeader, Reader, Panel } from "@/components/tarot";
+import { BrandHeader, MetallicIcon, Reader, Panel } from "@/components/tarot";
 
 const loginAttemptKey = "voice-tarot:login-attempt";
 const recentLoginKey = "voice-tarot:recent-login";
@@ -399,7 +399,7 @@ export function Home() {
         <Reader status="마이크 설정을 확인해줘" />
         <h1>{"공주 목소리를\n들을 수 있게 해줘."}</h1>
         <p className="hint">마이크 접근이 허용되지 않았어요</p>
-        <Panel title="NOTICE">
+        <Panel title="NOTICE" icon="notice-mark">
           <p>
             브라우저의 사이트 설정에서 마이크 접근을 허용한 뒤 다시 시도해줘.
           </p>
@@ -425,13 +425,13 @@ export function Home() {
             aria-label="녹음 안내 닫기"
             onClick={() => setShowPrivacy(false)}
           >
-            ×
+            <MetallicIcon name="close" />
           </button>
         </BrandHeader>
         <p className="hint">녹음 안내</p>
         <h1>{"목소리는 오직\n타로 상담을 위해"}</h1>
         <p>TEN MINUTES의 타로 상담과 상담 리포트 제공에 목소리를 이용해요.</p>
-        <Panel title="VOICE PRIVACY">
+        <Panel title="VOICE PRIVACY" icon={null}>
           <h2>어떤 정보를, 왜 쓰나요?</h2>
           <p>{aiProcessing}</p>
           <h2>마이크 허용과 녹음 저장은 별개예요</h2>
@@ -465,7 +465,7 @@ export function Home() {
           aria-controls={menu ? "home-menu" : undefined}
           onClick={() => setMenu(!menu)}
         >
-          {menu ? "×" : "☰"}
+          <MetallicIcon name={menu ? "close" : "menu"} />
         </button>
       </BrandHeader>
       {menu && (
@@ -487,11 +487,12 @@ export function Home() {
           >
             <small>MENU</small>
             <Link className="report-menu-item" to="/reports">
+              <MetallicIcon name="report-file" />
               <span>
                 <b>내 리포트</b>
                 <small>지난 상담을 다시 읽어보세요</small>
               </span>
-              <span aria-hidden="true">›</span>
+              <MetallicIcon name="chevron-right" />
             </Link>
             {auth.data && (
               <Button
@@ -518,19 +519,19 @@ export function Home() {
         </p>
         <small>지금은 공주 이야기만 듣는 시간.</small>
       </Panel>
-      <Panel title="NOTICE" className="notice">
+      <Panel title="NOTICE" icon="notice-mark" className="notice">
         <div className="notice-row">
-          <span>♬</span>
+          <MetallicIcon name="headset" />
           <div>
             <b>마이크 사용 · 필수</b>
             <small>목소리 상담에 마이크가 필요해요.</small>
           </div>
           <Button size="sm" onClick={() => void allowMic()} disabled={mic}>
-            {mic ? "✓ 허용됨" : "허용하기"}
+            {mic ? "허용됨" : "허용하기"}
           </Button>
         </div>
         <label className="notice-row">
-          <span>▥</span>
+          <MetallicIcon name="audio-lines" />
           <div>
             <b>상담 녹음 동의 · 선택</b>
             <small>녹음 없이도 상담할 수 있어요.</small>
@@ -561,10 +562,18 @@ export function Home() {
       <Button
         size="wide"
         variant="primary"
+        className="consultation-start"
         disabled={!mic || !consent || create.isPending}
         onClick={begin}
       >
-        {create.isPending ? "상담 준비 중…" : "☎ 10분 상담 시작하기"}
+        {create.isPending ? (
+          "상담 준비 중…"
+        ) : (
+          <>
+            <MetallicIcon name="phone" />
+            10분 상담 시작하기
+          </>
+        )}
       </Button>
       <p className="hint">
         {mic && consent

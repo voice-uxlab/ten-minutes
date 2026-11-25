@@ -38,5 +38,7 @@ test("a shuffled card shows its own image only after reveal", () => {
   rerender(<Cards cards={[cupAce]} revealed={[1]} />);
   const image = screen.getByRole("img", { name: cupAce.name });
   expect(image.getAttribute("src")).toBe("/cards/tarot/minor-cups-1.webp");
-  expect(image.closest(".card")?.classList.contains("reversed")).toBe(true);
+  expect(image.classList.contains("tarot-card-reversed")).toBe(true);
+  expect(image.parentElement?.className).toBe("tarot-card-face");
+  expect(screen.queryByText("TAROT")).toBeNull();
 });

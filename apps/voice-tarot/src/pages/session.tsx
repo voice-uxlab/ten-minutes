@@ -12,7 +12,7 @@ import {
 } from "@/features/consultation/domain";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BrandHeader, Reader, Panel } from "@/components/tarot";
+import { BrandHeader, MetallicIcon, Reader, Panel } from "@/components/tarot";
 const topicSets = [
   [
     "그 사람도 나를 좋아할까?",
@@ -25,16 +25,6 @@ const topicSets = [
     "새로운 인연을 만날 수 있을까?",
   ],
 ];
-
-function Wave() {
-  return (
-    <div className="wave" aria-hidden="true">
-      {Array.from({ length: 9 }, (_, i) => (
-        <i key={i} />
-      ))}
-    </div>
-  );
-}
 
 export function SessionPage() {
   const { id = "" } = useParams();
@@ -129,7 +119,7 @@ function Call({ initial }: { initial: Session }) {
               : "이야기를 이어가볼까?"}
         </h1>
         {v.phase === "error" && (
-          <Panel title="NOTICE">
+          <Panel title="NOTICE" icon="notice-mark">
             <p role="alert">
               {v.startIssue === "microphone"
                 ? "브라우저의 사이트 설정에서 마이크 접근을 허용한 뒤 다시 시도해줘."
@@ -315,14 +305,15 @@ function Call({ initial }: { initial: Session }) {
                 }
               >
                 {topic}
-                <span aria-hidden="true">›</span>
+                <MetallicIcon name="chevron-right" />
               </Button>
             ))}
             <button
               className="text-button"
               onClick={() => setTopics((topics + 1) % topicSets.length)}
             >
-              ⟳ 다른 질문 보기
+              <MetallicIcon name="refresh" />
+              다른 질문 보기
             </button>
           </div>
         </Panel>
@@ -336,7 +327,9 @@ function Call({ initial }: { initial: Session }) {
               편하게 이야기할 준비만 해줘.
             </p>
           </Panel>
-          <Wave />
+          <div className="wave">
+            <MetallicIcon name="wave-connecting" />
+          </div>
           <Button size="wide" onClick={() => navigate("/")}>
             연결 취소
           </Button>
@@ -474,7 +467,9 @@ function Call({ initial }: { initial: Session }) {
       ) : null}
       {v.phase === "listening" && (
         <div className="listening-wave">
-          <Wave />
+          <div className="wave">
+            <MetallicIcon name="wave-listening" />
+          </div>
           <p className="hint">말하면 자동으로 들어요</p>
         </div>
       )}
@@ -486,16 +481,7 @@ function Call({ initial }: { initial: Session }) {
             onClick={() => controller.mute()}
           >
             <span className="control-icon">
-              <img
-                src={
-                  v.muted
-                    ? "/assets/metallic/mic-off.png"
-                    : "/assets/metallic/mic.png"
-                }
-                width={v.muted ? 43 : 24}
-                height={v.muted ? 43 : 24}
-                alt=""
-              />
+              <MetallicIcon name={v.muted ? "mic-off" : "mic"} />
             </span>
             <span className="control-label">
               {v.muted ? "마이크 꺼짐" : "마이크 켜짐"}
@@ -503,12 +489,7 @@ function Call({ initial }: { initial: Session }) {
           </button>
           <button id="hangup" onClick={() => void controller.end()}>
             <span className="control-icon">
-              <img
-                src="/assets/metallic/end-call.png"
-                width={29.33}
-                height={29.33}
-                alt=""
-              />
+              <MetallicIcon name="end-call" />
             </span>
             <span className="control-label">통화 종료</span>
           </button>
