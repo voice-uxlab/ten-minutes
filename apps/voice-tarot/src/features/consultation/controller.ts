@@ -4,7 +4,7 @@ import { queryClient } from "@/api/client";
 import {
   consultationCommand,
   finishConsultation,
-  realtimeCredentials,
+  connectRealtime,
   reportsKey,
   streamSpeech,
 } from "@/api/consultations";
@@ -130,7 +130,6 @@ export class Consultation {
   private caption = "";
   private realtimeSpeechBuffer = "";
   private stopped = false;
-  private expiredAt = 0;
   private warned = false;
   private generation = 0;
   private inputContexts = new Map<string, NoteContext>();
@@ -434,11 +433,6 @@ export class Consultation {
         return;
       }
       this.stream = stream;
-      const { client_secret: token } = await realtimeCredentials(
-        s.readingId,
-        !!s.connected,
-      );
-      if (stale()) return;
       this.pc = new RTCPeerConnection();
       stream.getTracks().forEach((t) => this.pc!.addTrack(t, stream));
       this.speech = new SpeechPlayer(this.audio, {
@@ -481,27 +475,18 @@ export class Consultation {
         this.dc!.onerror = () => reject(Error("음성 연결에 실패했어요."));
         this.connectTimer = setTimeout(
           () => reject(Error("연결 시간이 초과됐어요.")),
-          15000,
+          30000,
         );
       });
       void opened.catch(() => {});
       await this.pc.setLocalDescription(await this.pc.createOffer());
       if (stale()) return;
-      const answer = await fetch("https://api.openai.com/v1/realtime/calls", {
-        method: "POST",
-        signal: AbortSignal.timeout(15000),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/sdp",
-        },
-        body: this.pc.localDescription!.sdp,
-      });
-      if (!answer.ok) throw Error("음성 통화 연결에 실패했어요.");
+      const answer = await connectRealtime(
+        s.readingId,
+        this.pc.localDescription!.sdp,
+      );
       if (stale()) return;
-      await this.pc.setRemoteDescription({
-        type: "answer",
-        sdp: await answer.text(),
-      });
+      await this.pc.setRemoteDescription({ type: "answer", sdp: answer });
       await opened;
       clearTimeout(this.connectTimer);
       if (stale()) return;
@@ -747,18 +732,9 @@ export class Consultation {
       this.warned = true;
       this.note("1분 남았어. 하던 해석을 마무리해. ");
     }
-    if (!left) {
-      this.expiredAt ||= Date.now();
-      this.stream?.getTracks().forEach((t) => {
-        t.enabled = false;
-      });
-      if (
-        (!this.responding && !this.speech?.busy) ||
-        Date.now() - this.expiredAt >= 30000
-      )
-        void this.end("TIMEOUT");
-    }
+    if (!left) void this.end("TIMEOUT");
   }
+
   private startRecording(enabled: boolean) {
     if (!enabled || !this.stream || !globalThis.MediaRecorder) return;
     try {
@@ -812,9 +788,17 @@ export class Consultation {
     this.speech?.close();
     this.stream?.getTracks().forEach((t) => t.stop());
     clearInterval(this.timer);
+    this.view.session.report = this.fallback();
+    this.view.session.reportPending = true;
+    this.persist();
     await this.queue.catch(() => {});
     let result: Report | null = null;
-    if (this.dc?.readyState === "open") {
+    const remaining = (this.view.session.endAt ?? Date.now()) - Date.now();
+    if (
+      reason === "USER" &&
+      remaining > 350 &&
+      this.dc?.readyState === "open"
+    ) {
       if (this.responding) this.send({ type: "response.cancel" });
       await delay(350);
       const response = new Promise<Report | null>((resolve) => {
@@ -838,7 +822,10 @@ export class Consultation {
             }),
         },
       });
-      result = await Promise.race([response, delay(25000).then(() => null)]);
+      result = await Promise.race([
+        response,
+        delay(Math.min(25000, remaining - 350)).then(() => null),
+      ]);
     }
     this.stopTransport();
     const base = this.fallback();

@@ -112,31 +112,15 @@
 
 ## 2. 음성 API
 
-### 2.1 Realtime client secret 발급
+### 2.1 Realtime WebRTC 연결
 
-`POST /api/v1/consultations/{consultation_id}/realtime-credentials`
+`POST /api/v1/consultations/{consultation_id}/realtime-connection`
 
-**Request body**
+인증된 브라우저가 JSON의 `sdp` 필드로 WebRTC SDP offer를 보낸다. FastAPI가 OpenAI에 세션 설정과 offer를 전달하고 `201 application/sdp`로 answer를 반환한다. 응답은 캐시하지 않는다. OpenAI 서비스 키는 백엔드에만 있고 call ID는 종료 작업을 위해 DB에 저장한다.
 
-```json
-{
-  "connection_reason": "INITIAL"
-}
-```
+계정마다 활성 통화는 하나만 허용한다. 같은 상담을 재연결하면 이전 OpenAI 통화를 닫고 기존 종료 시각을 유지한다. 생성 시도가 진행 중이거나 타 상담에 활성 연결이 있거나 상담이 만료되면 `409`다. 상담 또는 계정의 발급 한도에 도달하면 `429`다. 종료 워커가 연결되지 않았으면 `503`을 반환한다.
 
-`connection_reason`은 `INITIAL` 또는 `RECONNECT`다.
-
-**Response `201`**
-
-```json
-{
-  "client_secret": "ek_...",
-  "expires_at": 1794304860,
-  "realtime_model": "TBD"
-}
-```
-
-`expires_at`은 OpenAI 임시 키 만료 시각을 나타내는 Unix timestamp다. 임시 키는 로그나 DB에 저장하지 않는다. Realtime 설정은 텍스트 출력과 상담 도구를 포함한다. 서버의 `call_ends_at` 이후에는 키를 발급할 수 없다.
+워커는 DB에 기록된 종료 시각에 OpenAI WebRTC 연결을 닫고, 실패 시 재시도한다.
 
 ### 2.2 Typecast 음성 합성
 
@@ -163,6 +147,9 @@
 - `StreamingResponse`
 - `Content-Type`: `audio/wav` 스트림, 합성 속도 1.3배
 - JSON body 없음
+
+FastAPI 연결이 활성 상태여야 하고, 상담 종료 시각을 넘긴 합성은 허용하지 않는다.
+상담별/계정별 합성 글자 수나 동시 합성 요청 제한을 초과하면 `429`다.
 
 활성 상담의 소유자만 호출할 수 있다. 모델과 voice ID는 서버 설정에서 정하며 요청 body로 받지 않는다. 상담별 글자 수, 호출 빈도, 동시 합성 수 제한은 **TBD**다. 텍스트와 생성 오디오는 DB나 로그에 저장하지 않는다.
 

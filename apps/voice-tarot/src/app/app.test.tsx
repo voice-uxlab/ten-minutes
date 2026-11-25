@@ -183,9 +183,9 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
     }
     if (path === `${consultPath}/${consultationId}`)
       return Response.json(consultation);
-    if (path === `${consultPath}/${consultationId}/realtime-credentials`) {
+    if (path === `${consultPath}/${consultationId}/realtime-connection`) {
       consultation.status = "CONNECTING";
-      return Response.json({ client_secret: "test-token" });
+      return new Response("answer");
     }
     if (path === `${consultPath}/${consultationId}/card-selection`) {
       expect(JSON.parse(String(options?.body))).toMatchObject({
@@ -205,8 +205,6 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
         })),
       });
     }
-    if (String(path).startsWith("https://api.openai.com/"))
-      return new Response("answer");
     throw Error(`Unexpected request: ${path}`);
   });
   const audioTrack = { stop: vi.fn(), enabled: true };

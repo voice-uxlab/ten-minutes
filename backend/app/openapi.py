@@ -9,6 +9,7 @@ ERROR_DEFAULTS = {
     404: ("Resource Not Found", "RESOURCE_NOT_FOUND", "The requested resource was not found."),
     409: ("State Conflict", "STATE_CONFLICT", "The request conflicts with the current resource state."),
     422: ("Validation Error", "VALIDATION_ERROR", "Check the request values."),
+    429: ("Usage Limit", "USAGE_LIMIT", "The request exceeds the applicable usage limit."),
     500: ("Internal Server Error", "INTERNAL_SERVER_ERROR", "The server could not process the request."),
     502: ("Upstream Service Error", "UPSTREAM_SERVICE_ERROR", "The upstream service request failed."),
     503: ("Service Unavailable", "SERVICE_NOT_CONFIGURED", "The service is not ready."),

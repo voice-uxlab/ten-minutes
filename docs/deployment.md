@@ -152,3 +152,8 @@ PUBLIC_WEB_ORIGIN=https://ten-minutes-dev.vercel.app
 - [ ] 프론트엔드에서 로그인 및 회원 온보딩 확인
 - [ ] 동의 버전 저장 및 상담 생성 검증 확인
 - [ ] Preview Protection 상태에서 전체 흐름 확인
+
+
+## Realtime 종료 워커
+
+음성 연결을 활성화하기 전에 Alembic 마이그레이션을 적용하고, API와 같은 PostgreSQL 및 OpenAI 프로젝트 설정으로 `python -m app.voice_worker`를 상시 실행한다. Vercel의 FastAPI 요청 프로세스와 분리된 워커 실행 환경이 필요하다. 워커의 상태가 확인되기 전까지 API는 새 음성 연결을 거절한다.

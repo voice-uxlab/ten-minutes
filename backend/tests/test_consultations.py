@@ -468,53 +468,135 @@ def test_unhandled_error_response_hides_internal_exception_details():
     assert b"database-password" not in response.body
 
 
-def test_realtime_and_typecast_use_one_deadline_and_consultation_tools(authenticated_client, db_session, monkeypatch):
+def test_voice_connection_and_typecast_limits(authenticated_client, db_session, monkeypatch):
+    import json
     from datetime import datetime, timedelta, timezone
 
     import httpx
 
     from app.config import get_settings
-    from app.models import Consultation
+    from app.models import Consultation, RealtimeCall, VoiceWorkerHeartbeat
+    from app.voice import TOOLS
 
     client, _ = authenticated_client
     settings = get_settings()
-    monkeypatch.setattr(settings, "openai_api_key", "test-openai-key")
-    monkeypatch.setattr(settings, "typecast_api_key", "test-typecast-key")
-    monkeypatch.setattr(settings, "typecast_voice_id", "test-voice")
-    monkeypatch.setattr(settings, "typecast_model", "ssfm-v30")
-    upstream_requests = []
+    for field, value in {
+        "openai_api_key": "test-openai-key",
+        "typecast_api_key": "test-typecast-key",
+        "typecast_voice_id": "test-voice",
+        "typecast_model": "ssfm-v30",
+        "voice_connections_per_consultation": 2,
+        "voice_connections_per_account_day": 2,
+        "tts_characters_per_consultation": 10,
+        "tts_characters_per_account_day": 12,
+        "tts_parallel_requests": 1,
+    }.items():
+        monkeypatch.setattr(settings, field, value)
+    calls = []
+    tts = []
+    deadline = datetime.now(timezone.utc)
 
-    async def provider_response(self, request, **kwargs):
-        import json
+    def provider_response(self, url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/hangup"):
+            return httpx.Response(200)
+        return httpx.Response(
+            201, text="v=0\r\nanswer",
+            headers={"Location": f"/v1/realtime/calls/rtc_test_{len(calls)}"},
+        )
 
-        upstream_requests.append(json.loads(request.content))
-        if request.url.host == "api.openai.com":
-            return httpx.Response(200, json={"value": "ephemeral-test", "expires_at": 12345})
+    async def tts_response(self, request, **kwargs):
+        tts.append(json.loads(request.content))
         return httpx.Response(200, content=b"wav-test", headers={"content-type": "audio/wav"})
 
-    monkeypatch.setattr(httpx.AsyncClient, "send", provider_response)
-    consultation = create_consultation(client)
+    monkeypatch.setattr(httpx.Client, "post", provider_response)
+    # Only the voice provider uses HTTPX Client.post here, so use request() for TestClient POSTs.
+    monkeypatch.setattr(httpx.AsyncClient, "send", tts_response)
+    consultation = client.request("POST", "/api/v1/consultations", json={"consent_version": "2026-11"}).json()
     path = f"/api/v1/consultations/{consultation['id']}"
-    for reason in ("INITIAL", "RECONNECT"):
-        token = client.post(f"{path}/realtime-credentials", json={"connection_reason": reason})
-        assert token.status_code == 201
-        assert token.json()["client_secret"] == "ephemeral-test"
-        assert client.get(path).json()["call_ends_at"] == consultation["call_ends_at"]
-    session = upstream_requests[0]["session"]
-    assert session["output_modalities"] == ["text"]
-    assert {tool["name"] for tool in session["tools"]} >= {"reveal_card", "show_reading", "end_call"}
+    offer = {"sdp": "v=0\r\noffer"}
+    connection = f"{path}/realtime-connection"
+    speech = {"text": "첫 인사", "response_id": "resp_test", "segment_index": 0}
+    assert client.request("POST", connection, json=offer).status_code == 503
+    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 409
+    db_session.add(VoiceWorkerHeartbeat(id=1, seen_at=deadline))
+    db_session.commit()
 
-    speech_request = {"text": "공주야, 안녕.", "response_id": "resp_test", "segment_index": 0}
-    audio = client.post(f"{path}/tts/stream", json=speech_request)
-    assert audio.status_code == 200
-    assert audio.content == b"wav-test"
-    assert upstream_requests[-1]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
+    answer = client.request("POST", connection, json=offer)
+    assert answer.status_code == 201 and answer.text == "v=0\r\nanswer"
+    assert answer.headers["cache-control"] == "no-store"
+    model_config = json.loads(calls[0][1]["files"]["session"][1])
+    assert model_config["output_modalities"] == ["text"] and model_config["tools"] == TOOLS
 
-    stored = db_session.get(Consultation, consultation["id"])
+    second = client.request("POST", "/api/v1/consultations", json={"consent_version": "2026-11"}).json()
+    second_path = f"/api/v1/consultations/{second['id']}"
+    assert client.request("POST", f"{second_path}/realtime-connection", json=offer).status_code == 409
+    assert client.request("POST", connection, json=offer).status_code == 201
+    assert calls[1][0].endswith("/rtc_test_1/hangup")
+    assert client.get(path).json()["call_ends_at"] == consultation["call_ends_at"]
+    assert client.request("POST", connection, json=offer).status_code == 429
+
+    audio = client.request("POST", f"{path}/tts/stream", json=speech)
+    assert audio.status_code == 200 and audio.content == b"wav-test"
+    assert tts[0]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
+    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 200
+    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 429
+    assert len(tts) == 2
+
+    ended = client.request("POST", f"{path}/end", json={"reason": "USER"})
+    assert ended.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(RealtimeCall, "rtc_test_3").hangup_at <= datetime.now(timezone.utc).replace(tzinfo=None)
+    assert client.request("POST", connection, json=offer).status_code == 409
+
+    stored = db_session.get(Consultation, second["id"])
     stored.created_at = datetime.now(timezone.utc) - timedelta(minutes=11)
     db_session.commit()
-    assert client.post(f"{path}/tts/stream", json=speech_request).json()["error"]["code"] == "CONSULTATION_EXPIRED"
-    assert client.post(f"{path}/realtime-credentials", json={"connection_reason": "RECONNECT"}).status_code == 409
+    assert client.request("POST", f"{second_path}/realtime-connection", json=offer).json()["error"]["code"] == "CONSULTATION_EXPIRED"
+
+
+def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from urllib.parse import parse_qs, urlsplit
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+    from app import auth
+    from app.config import get_settings
+    from app.main import app
+    from app.models import OAuthAttempt
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "kakao_client_id", "test-kakao")
+    monkeypatch.setattr(settings, "naver_client_id", "test-naver")
+    async def profile(provider, *args):
+        return f"{provider}-test-account", None
+    monkeypatch.setattr(auth, "exchange_profile", profile)
+    with TestClient(app) as browser, TestClient(app) as other:
+        for provider in ("kakao", "naver"):
+            start = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
+            state = parse_qs(urlsplit(start.headers["location"]).query)["state"][0]
+            assert "HttpOnly" in start.headers["set-cookie"] and "SameSite=lax" in start.headers["set-cookie"]
+            path = f"/auth/{provider}/callback"
+            params = {"state": state, "code": "test-code"}
+            assert other.get(path, params=params, follow_redirects=False).status_code == 400
+            cookie_name = auth.oauth_cookie_name(provider, settings)
+            binding = browser.cookies.get(cookie_name)
+            assert browser.get(path, params=params, follow_redirects=False).status_code == 302
+            assert browser.get("/api/v1/users/me").status_code == 200
+            browser.cookies.set(cookie_name, binding)
+            assert browser.get(path, params=params, follow_redirects=False).status_code == 400
+            browser.cookies.delete(cookie_name)
+
+            expired = browser.get(f"/auth/{provider}/authorize", follow_redirects=False)
+            expired_state = parse_qs(urlsplit(expired.headers["location"]).query)["state"][0]
+            attempt = db_session.scalar(select(OAuthAttempt).where(
+                OAuthAttempt.state_hash == auth.token_hash(expired_state)
+            ))
+            attempt.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db_session.commit()
+            assert browser.get(path, params={**params, "state": expired_state},
+                               follow_redirects=False).status_code == 400
 
 
 def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_client):
@@ -538,3 +620,43 @@ def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_cli
         report = client.get(f"{path}/report").json()
         assert [card["slot"] for card in report["cards"]] == revealed_slots
         assert report["readings"] == body["readings"]
+
+
+def test_voice_worker_retries_pending_hangup_and_marks_timeout(authenticated_client, db_session, monkeypatch):
+    from contextlib import contextmanager
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+
+    from app import voice_worker
+    from app.models import Consultation, RealtimeCall, VoiceWorkerHeartbeat
+
+    client, _ = authenticated_client
+    consultation = create_consultation(client)
+    stored = db_session.get(Consultation, consultation["id"])
+    now = datetime.now(timezone.utc)
+    stored.created_at = now - timedelta(minutes=11)
+    stored.status = "ACTIVE"
+    call = RealtimeCall(id="rtc_timeout", consultation_id=stored.id, hangup_at=stored.call_ends_at)
+    db_session.add_all([call, VoiceWorkerHeartbeat(id=1, seen_at=now - timedelta(minutes=1))])
+    db_session.commit()
+
+    @contextmanager
+    def test_transaction():
+        try:
+            yield db_session
+            db_session.commit()
+        except Exception:
+            db_session.rollback()
+            raise
+
+    monkeypatch.setattr(voice_worker, "transaction", test_transaction)
+    hangup = Mock(side_effect=[False, True])
+    monkeypatch.setattr(voice_worker, "hangup", hangup)
+    assert voice_worker.due_calls() == [call.id]
+    voice_worker.close_due_call(call.id, "fixture")
+    assert call.closed_at is None and stored.status == "ACTIVE"
+    assert voice_worker.due_calls() == [call.id]
+    voice_worker.close_due_call(call.id, "fixture")
+    assert call.closed_at is not None and stored.status == "ENDED"
+    assert stored.end_reason == "TIMEOUT" and stored.ended_at == stored.call_ends_at
+    assert voice_worker.due_calls() == []

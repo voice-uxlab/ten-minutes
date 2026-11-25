@@ -184,14 +184,16 @@ export async function consultationCommand(
   return result;
 }
 
-export function realtimeCredentials(id: string, reconnect: boolean) {
-  return fastApiJson<{ client_secret: string }>(
-    `${path(id)}/realtime-credentials`,
+export async function connectRealtime(id: string, sdp: string) {
+  const response = await fastApiJson<Response>(
+    `${path(id)}/realtime-connection`,
     "POST",
-    {
-      connection_reason: reconnect ? "RECONNECT" : "INITIAL",
-    },
+    { sdp },
+    undefined,
+    AbortSignal.timeout(25000),
+    "response",
   );
+  return response.text();
 }
 
 export function streamSpeech(

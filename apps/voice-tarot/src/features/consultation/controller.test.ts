@@ -87,9 +87,7 @@ beforeEach(async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
-      if (path === `${pathPrefix}/realtime-credentials`)
-        return Response.json({ client_secret: "test-token" });
-      if (path.startsWith("https://api.openai.com/"))
+      if (path === `${pathPrefix}/realtime-connection`)
         return new Response("answer");
       if (path === `${pathPrefix}/card-selection`) {
         mutations.confirm_cards = (mutations.confirm_cards || 0) + 1;
@@ -332,12 +330,10 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
     vi
       .mocked(fetch)
       .mock.calls.filter(
-        ([path]) => path === `${pathPrefix}/realtime-credentials`,
+        ([path]) => path === `${pathPrefix}/realtime-connection`,
       )
-      .map(
-        ([, options]) => JSON.parse(String(options?.body)).connection_reason,
-      ),
-  ).toEqual(["INITIAL", "RECONNECT"]);
+      .map(([, options]) => JSON.parse(String(options?.body)).sdp),
+  ).toEqual(["offer", "offer"]);
   expect(controller.getSnapshot().session.picks).toEqual([7]);
   expect(controller.getSnapshot().phase).toBe("picking");
   // Continue exclusively through model tool events, with no UI interactions.

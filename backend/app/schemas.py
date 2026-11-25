@@ -321,21 +321,15 @@ class ClientEventResponse(StrictModel):
     stored_at: datetime = Field(description="Server storage timestamp")
 
 
-class RealtimeCredentialRequest(StrictModel):
-    connection_reason: str = Field(description="Connection reason: INITIAL or RECONNECT", examples=["INITIAL"])
+class RealtimeConnectionRequest(StrictModel):
+    sdp: str = Field(min_length=8, max_length=65536, description="WebRTC SDP offer")
 
-    @field_validator("connection_reason")
+    @field_validator("sdp")
     @classmethod
-    def valid_reason(cls, value: str) -> str:
-        if value not in {"INITIAL", "RECONNECT"}:
-            raise ValueError("unsupported connection reason")
+    def valid_offer(cls, value: str) -> str:
+        if not value.startswith(("v=0\r\n", "v=0\n")):
+            raise ValueError("invalid SDP offer")
         return value
-
-
-class RealtimeCredentialResponse(StrictModel):
-    client_secret: str = Field(description="Short-lived secret used only for a direct browser connection to OpenAI Realtime")
-    expires_at: int = Field(description="Client secret expiration time as a Unix timestamp")
-    realtime_model: str = Field(description="OpenAI Realtime model to connect to")
 
 
 class TTSRequest(StrictModel):
