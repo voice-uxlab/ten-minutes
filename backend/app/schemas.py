@@ -151,7 +151,7 @@ class ConsultationResponse(StrictModel):
     report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report exists")
     created_at: datetime = Field(description="Consultation creation timestamp")
     ended_at: Optional[datetime] = Field(description="Consultation end timestamp, or null while active")
-    call_ends_at: Optional[datetime] = Field(description="Legacy field, always null")
+    call_ends_at: datetime = Field(description="Server deadline for the ten-minute call")
 
 
 class ConsultationListItem(StrictModel):

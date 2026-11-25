@@ -164,6 +164,7 @@ async function session() {
     ...emptyReading,
     ...created.state,
     readingId: consultationId,
+    endAt: Date.now() + 600000,
     demo: false,
     date: new Date().toISOString(),
     notes: [],
@@ -267,10 +268,11 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   );
   expect(saved.report?.readings).toHaveLength(3);
 });
-test("Realtime duplicate tool events mutate once; FastAPI reconnects to the same consultation", async () => {
+test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {
   mockRealtime();
   controller = new Consultation(await session());
   await controller.start();
+  const deadline = controller.getSnapshot().session.endAt;
   await controller.event({
     type: "response.created",
     response: { id: "spoken" },
@@ -326,6 +328,7 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects to the same
   controller.dispose();
   controller = new Consultation(loadSession(id)!);
   await controller.start();
+  expect(controller.getSnapshot().session.endAt).toBe(deadline);
   expect(
     vi
       .mocked(fetch)
@@ -507,6 +510,29 @@ test("renews the current voice connection and stops heartbeats on dispose", asyn
     controller.dispose();
     await vi.advanceTimersByTimeAsync(60000);
     expect(heartbeat).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("requests a wrap-up at nine minutes and ends at the original deadline", async () => {
+  mockRealtime();
+  const reading = await session();
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(reading.endAt! - 600000);
+    controller = new Consultation(reading);
+    await controller.start();
+    const warnings = () => sends.filter((event) => JSON.stringify(event).includes("1분 남았어"));
+    await vi.advanceTimersByTimeAsync(539999);
+    expect(warnings()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(warnings()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(warnings()).toHaveLength(1);
+    const endings = vi.mocked(fetch).mock.calls.filter(([path]) => path === `${pathPrefix}/end`);
+    expect(endings).toHaveLength(1);
+    expect(JSON.parse(String(endings[0][1]?.body))).toEqual({ reason: "TIMEOUT" });
   } finally {
     vi.useRealTimers();
   }

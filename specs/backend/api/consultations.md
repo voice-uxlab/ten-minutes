@@ -28,7 +28,7 @@
 }
 ```
 
-카드 수와 덱 크기는 서버가 정한다. 호환을 위해 응답에 남겨둔 `call_ends_at`은 항상 `null`이다.
+카드 수와 덱 크기는 서버가 정한다. `call_ends_at`은 상담 생성 시각에서 10분 후이며 재연결해도 유지된다.
 
 **Response `201` — `ConsultationResponse`**
 
@@ -43,7 +43,7 @@
   "report_status": null,
   "created_at": "2026-11-12T10:00:00Z",
   "ended_at": null,
-  "call_ends_at": null
+  "call_ends_at": "2026-11-12T10:10:00Z"
 }
 ```
 

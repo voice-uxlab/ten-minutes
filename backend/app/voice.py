@@ -33,6 +33,8 @@ TOOLS = json.loads((PROMPTS / "realtime_tools.json").read_text(encoding="utf-8")
 def active_consultation(consultation: Consultation) -> None:
     if consultation.status in {"ENDED", "ENDING", "FAILED"}:
         raise APIError(409, "CONSULTATION_STATE_CONFLICT", "The consultation has ended.")
+    if consultation.call_ends_at <= datetime.now(timezone.utc):
+        raise APIError(409, "CONSULTATION_EXPIRED", "The ten-minute consultation has expired.")
 
 
 def lock_account(db: Session, user_id: str) -> None:
@@ -154,11 +156,12 @@ def create_voice_connection(
                 accepted = (
                     consultation.voice_reservation == reservation
                     and consultation.status not in {"ENDED", "ENDING", "FAILED"}
+                    and consultation.call_ends_at > now
                     and response.text.startswith("v=0")
                 )
                 db.add(RealtimeCall(
                     id=call_id, consultation_id=consultation_id,
-                    hangup_at=now + VOICE_IDLE_TIMEOUT if accepted else now,
+                    hangup_at=min(now + VOICE_IDLE_TIMEOUT, consultation.call_ends_at) if accepted else now,
                 ))
                 if accepted and consultation.status == "CREATED":
                     consultation.status = "CONNECTING"
@@ -209,7 +212,7 @@ def renew_voice_connection(db: Session, consultation_id: str, user_id: str, toke
         or not secrets.compare_digest(connection_token(call.id), token)
     ):
         raise APIError(409, "VOICE_CONNECTION_INACTIVE", "This voice connection is no longer active.")
-    call.hangup_at = now + VOICE_IDLE_TIMEOUT
+    call.hangup_at = min(now + VOICE_IDLE_TIMEOUT, consultation.call_ends_at)
     db.commit()
 
 
