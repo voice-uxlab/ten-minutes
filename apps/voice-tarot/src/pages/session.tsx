@@ -402,23 +402,6 @@ function Call({ initial }: { initial: Session }) {
                     : "1~78 중 서로 다른 번호를 말해줘. 다 뽑으면 한 장씩 해석해줄게."}
                 </p>
               </Panel>
-              <details>
-                <summary>직접 번호 고르기</summary>
-                <div id="grid">
-                  {Array.from({ length: 78 }, (_, i) => i + 1).map((n) => (
-                    <button
-                      key={n}
-                      aria-label={`${n}번 카드`}
-                      aria-pressed={s.picks.includes(n)}
-                      className={s.picks.includes(n) ? "selected" : ""}
-                      disabled={v.busy || s.cards.some((c) => c.number === n)}
-                      onClick={() => controller.pick(n)}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </details>
             </>
           ) : null}
           {!selecting && v.phase !== "question" && (

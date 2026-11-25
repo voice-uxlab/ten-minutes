@@ -157,7 +157,7 @@ test("a logged-in user with older consent is sent to onboarding", async () => {
     }),
   );
   render(<App />);
-  await screen.findByRole("heading", { name: /만나서 반가워/ });
+  await screen.findByRole("heading", { name: "어떻게 불러줄까?" });
   expect(location.pathname).toBe("/onboarding");
 });
 
@@ -207,6 +207,33 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
     }
     throw Error(`Unexpected request: ${path}`);
   });
+  let receiveRealtime: (message: MessageEvent<string>) => void;
+  async function sayCardNumbers(picks: number[]) {
+    const id = `picks-${picks.join("-")}`;
+    await act(async () => {
+      for (const event of [
+        { type: "response.created", response: { id } },
+        {
+          type: "response.done",
+          response: {
+            id,
+            output: [
+              {
+                type: "function_call",
+                name: "select_numbers",
+                arguments: JSON.stringify({ picks }),
+                call_id: id,
+              },
+            ],
+          },
+        },
+      ]) {
+        receiveRealtime(
+          new MessageEvent("message", { data: JSON.stringify(event) }),
+        );
+      }
+    });
+  }
   const audioTrack = { stop: vi.fn(), enabled: true };
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
@@ -232,6 +259,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
       channel = {
         readyState: "open",
         onopen: () => {},
+        onmessage: vi.fn<(event: MessageEvent<string>) => void>(),
         send: () => {},
         close: () => {},
       };
@@ -244,6 +272,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
       }
       async setLocalDescription() {}
       async setRemoteDescription() {
+        receiveRealtime = this.channel.onmessage;
         this.channel.onopen();
       }
       close() {}
@@ -263,9 +292,8 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   );
   await user.click(await screen.findByText("응, 이 질문으로 볼래"));
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(0);
-  await user.click(await screen.findByText("직접 번호 고르기"));
-  await user.click(await screen.findByLabelText("7번 카드"));
-  await user.click(screen.getByLabelText("22번 카드"));
+  expect(screen.queryByText("직접 번호 고르기")).toBeNull();
+  await sayCardNumbers([7, 22]);
   await screen.findByText(/1개만 더/);
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(2);
   const reading = loadSession(consultationId)!;
@@ -285,8 +313,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   await user.click(await screen.findByLabelText(/음성은 OpenAI로/));
   await user.click(screen.getByRole("button", { name: "상담 연결하기" }));
   await screen.findByText(/1개만 더/);
-  await user.click(await screen.findByText("직접 번호 고르기"));
-  await user.click(await screen.findByLabelText("51번 카드"));
+  await sayCardNumbers([51]);
   await user.click(await screen.findByText("응, 이 3장을 열어줘"));
   await screen.findByRole("heading", { name: /공주가 고른 카드를/ });
   expect(

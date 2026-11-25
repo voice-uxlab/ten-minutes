@@ -171,6 +171,25 @@ async function session() {
     transcript: [],
   } as Session;
 }
+function mockRealtime() {
+  vi.stubGlobal(
+    "AudioContext",
+    class {
+      destination = {};
+      async resume() {}
+      async close() {}
+    },
+  );
+  vi.stubGlobal("RTCPeerConnection", Peer);
+  vi.stubGlobal("navigator", {
+    mediaDevices: {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {}, enabled: true }],
+        getAudioTracks: () => [{ stop() {}, enabled: true }],
+      }),
+    },
+  });
+}
 async function emit(name: string, args: unknown, id: string) {
   await controller.event({ type: "response.created", response: { id } });
   const event: RealtimeEvent = {
@@ -250,23 +269,7 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   expect(saved.report?.readings).toHaveLength(3);
 });
 test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {
-  vi.stubGlobal(
-    "AudioContext",
-    class {
-      destination = {};
-      async resume() {}
-      async close() {}
-    },
-  );
-  vi.stubGlobal("RTCPeerConnection", Peer);
-  vi.stubGlobal("navigator", {
-    mediaDevices: {
-      getUserMedia: async () => ({
-        getTracks: () => [{ stop() {}, enabled: true }],
-        getAudioTracks: () => [{ stop() {}, enabled: true }],
-      }),
-    },
-  });
+  mockRealtime();
   controller = new Consultation(await session());
   await controller.start();
   const deadline = controller.getSnapshot().session.endAt;
@@ -401,3 +404,77 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
   expect((await pendingReveal).error).toBeTruthy();
   expect(mutations.reveal_card).toBe(reveals);
 });
+
+test.each([
+  [
+    "카드 설명을 인용한 경우",
+    "소드 6이 떴어. 어떤 느낌이 들어?",
+    "상담 내용을 요약하지 못했어.",
+  ],
+  [
+    "새로 요약한 경우",
+    "일을 계속할지, 다른 방향을 준비할지 고민하고 있어.",
+    "일을 계속할지, 다른 방향을 준비할지 고민하고 있어.",
+  ],
+  ["요약 요청이 거절된 경우", null, "상담 내용을 요약하지 못했어."],
+])(
+  "저장 리포트에 대화 원문을 옮기지 않는다 — %s",
+  async (_, summary, expected) => {
+    mockRealtime();
+    controller = new Consultation({
+      ...(await session()),
+      question: "지금 일을 계속할까?",
+      transcript: ["레나: 소드 6이 떴어. 어떤 느낌이 들어?"],
+    });
+    await controller.start();
+
+    const ending = controller.end();
+    const report = await vi.waitFor(() => {
+      const request = sends.find(
+        (event) => event.event_id === `report-${consultationId}`,
+      );
+      expect(request).toBeDefined();
+      return request!;
+    });
+    expect(report.response).toMatchObject({
+      conversation: "none",
+      tool_choice: { type: "function", name: "write_report" },
+      input: [{ role: "user", content: [{ type: "input_text" }] }],
+    });
+    if (summary === null) {
+      await controller.event({
+        type: "error",
+        error: {
+          event_id: String(report.event_id),
+          code: "invalid_request_error",
+        },
+      });
+    } else {
+      await controller.event({
+        type: "response.done",
+        response: {
+          id: "report-response",
+          metadata: { purpose: "report" },
+          status: "completed",
+          output: [
+            {
+              type: summary === expected ? "message" : "function_call",
+              name: "write_report",
+              call_id: "report-call",
+              arguments:
+                summary === expected ? "" : JSON.stringify({ summary }),
+              content: [{ text: JSON.stringify({ summary }) }],
+            },
+          ],
+        },
+      });
+    }
+    await ending;
+    const saved = vi
+      .mocked(fetch)
+      .mock.calls.find(([path]) => path === `${pathPrefix}/report`);
+    expect(JSON.parse(String(saved?.[1]?.body)).situation_summary).toBe(
+      expected,
+    );
+  },
+);

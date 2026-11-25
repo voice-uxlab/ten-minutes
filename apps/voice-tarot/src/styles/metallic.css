@@ -271,6 +271,59 @@
   padding: 4px 0;
   line-height: 18px;
 }
+.onboarding-page form {
+  display: grid;
+  gap: 12px;
+}
+.onboarding-page h1 {
+  margin-bottom: 10px;
+}
+.onboarding-page .topic-list {
+  min-width: 0;
+}
+.onboarding-page .topic-list label {
+  cursor: pointer;
+  gap: 12px;
+}
+.onboarding-page input:is([type="radio"], [type="checkbox"]) {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--pink);
+}
+.onboarding-nickname {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+.onboarding-nickname .text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  min-height: 36px;
+  padding-inline: 0;
+}
+.onboarding-page .consent {
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.onboarding-page .consent + .consent {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #fff3;
+}
+.onboarding-page .consent small {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
 .intro .consultation-start {
   font-weight: 500;
 }
@@ -386,9 +439,6 @@
 .phase-content .slots {
   margin: 8px 0 12px;
   min-height: 0;
-}
-.phase-content > details > summary {
-  color: var(--pink);
 }
 .topic-list {
   display: grid;

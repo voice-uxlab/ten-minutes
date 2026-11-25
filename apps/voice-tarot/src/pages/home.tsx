@@ -205,43 +205,47 @@ export function Onboarding() {
   if (!auth.data) return <Navigate to="/login" replace />;
   if (!auth.data?.onboarding_required) return <Navigate to="/" replace />;
   return (
-    <section className="page">
-      <h1>만나서 반가워, 공주야.</h1>
-      <Panel title="어떻게 불러줄까?">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (saveMember.isPending || (customName && !nick.trim())) return;
-            saveMember.mutate(
-              customName
-                ? { addressing_mode: "CUSTOM", nickname: nick.trim() }
-                : { addressing_mode: "DEFAULT", nickname: null },
-            );
-          }}
-        >
-          <fieldset>
-            <legend>호칭 선택</legend>
-            <label className="consent">
+    <section className="page metallic-page onboarding-page">
+      <BrandHeader />
+      <Reader profile />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (saveMember.isPending || (customName && !nick.trim())) return;
+          saveMember.mutate(
+            customName
+              ? { addressing_mode: "CUSTOM", nickname: nick.trim() }
+              : { addressing_mode: "DEFAULT", nickname: null },
+          );
+        }}
+      >
+        <Panel title="MESSAGE">
+          <h1 id="onboarding-addressing">어떻게 불러줄까?</h1>
+          <fieldset
+            className="topic-list"
+            aria-labelledby="onboarding-addressing"
+          >
+            <label className="glass">
+              기본 호칭 (공주)
               <input
                 type="radio"
                 name="addressing-mode"
                 checked={!customName}
                 onChange={() => setCustomName(false)}
-              />{" "}
-              기본 호칭 (공주)
+              />
             </label>
-            <label className="consent">
+            <label className="glass">
+              닉네임으로 불리기
               <input
                 type="radio"
                 name="addressing-mode"
                 checked={customName}
                 onChange={() => setCustomName(true)}
-              />{" "}
-              닉네임으로 불리기
+              />
             </label>
           </fieldset>
-          {customName ? (
-            <>
+          {customName && (
+            <div className="onboarding-nickname">
               <label htmlFor="nick">닉네임</label>
               <Input
                 id="nick"
@@ -250,9 +254,9 @@ export function Onboarding() {
                 maxLength={40}
                 required
               />
-              <Button
+              <button
                 type="button"
-                variant="ghost"
+                className="text-button"
                 onClick={() =>
                   setNick(
                     ["새벽의 별", "빛나는 달", "당당한 장미"][
@@ -261,30 +265,35 @@ export function Onboarding() {
                   )
                 }
               >
-                랜덤 닉네임 ⚄
-              </Button>
-            </>
-          ) : null}
+                <MetallicIcon name="refresh" />
+                랜덤 닉네임
+              </button>
+            </div>
+          )}
+        </Panel>
+        <Panel title="NOTICE" icon="notice-mark">
           <label className="consent">
-            <input type="checkbox" required /> 만 14세 이상이에요.
+            <span>만 14세 이상이에요.</span>
+            <input type="checkbox" required />
           </label>
           <label className="consent">
-            <input type="checkbox" required /> {aiProcessing}
+            <span>
+              <b>상담을 위한 음성 처리</b>
+              <small>{aiProcessing}</small>
+            </span>
+            <input type="checkbox" required />
           </label>
-          {!consentVersion ? (
-            <p role="alert">회원 가입 설정을 확인해 주세요.</p>
-          ) : null}
-          {saveMember.error ? (
-            <p role="alert">{saveMember.error.message}</p>
-          ) : null}
-          <Button
-            size="wide"
-            disabled={saveMember.isPending || !consentVersion}
-          >
-            {saveMember.isPending ? "저장 중…" : "레나 만나러 가기"}
-          </Button>
-        </form>
-      </Panel>
+        </Panel>
+        {!consentVersion && <p role="alert">회원 가입 설정을 확인해 주세요.</p>}
+        {saveMember.error && <p role="alert">{saveMember.error.message}</p>}
+        <Button
+          size="wide"
+          variant="primary"
+          disabled={saveMember.isPending || !consentVersion}
+        >
+          {saveMember.isPending ? "저장 중…" : "레나 만나러 가기"}
+        </Button>
+      </form>
     </section>
   );
 }
