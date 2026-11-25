@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Optional
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     typecast_api_key: Optional[str] = None
     typecast_voice_id: Optional[str] = None
     typecast_model: str = "ssfm-v30"
+    voice_cleanup_secret: Optional[SecretStr] = None
     voice_connections_per_consultation: int = Field(default=4, ge=1)
     voice_connections_per_account_day: int = Field(default=20, ge=1)
     tts_characters_per_consultation: int = Field(default=12000, ge=1)

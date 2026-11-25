@@ -655,3 +655,68 @@ def test_ended_call_can_save_and_retry_partial_or_empty_report(authenticated_cli
         report = client.get(f"{path}/report").json()
         assert [card["slot"] for card in report["cards"]] == revealed_slots
         assert report["readings"] == body["readings"]
+
+
+def test_voice_heartbeat_and_cleanup_leave_live_calls_open(authenticated_client, db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+
+    import httpx
+    from fastapi.testclient import TestClient
+    from pydantic import SecretStr
+
+    from app.config import get_settings
+    from app.main import app
+    from app.models import RealtimeCall
+
+    client, _ = authenticated_client
+    settings = get_settings()
+    for key in ("openai_api_key", "typecast_api_key", "typecast_voice_id"):
+        monkeypatch.setattr(settings, key, "test-provider")
+    monkeypatch.setattr(settings, "voice_cleanup_secret", SecretStr("test-cleanup-secret"))
+    provider = Mock(side_effect=[
+        httpx.Response(201, text="v=0\r\nanswer", headers={"Location": "/v1/realtime/calls/rtc_heartbeat"}),
+        httpx.Response(502),
+        httpx.Response(200),
+    ])
+    monkeypatch.setattr(httpx.Client, "post", provider)
+    consultation = client.request(
+        "POST", "/api/v1/consultations", json={"consent_version": "2026-11"},
+    ).json()
+    path = f"/api/v1/consultations/{consultation['id']}"
+    connection = client.request(
+        "POST", path + "/realtime-connection",
+        json={"sdp": "v=0\r\noffer"}, headers={"Origin": settings.public_web_origin},
+    )
+    assert connection.status_code == 201
+    token = connection.headers["X-Voice-Connection"]
+    assert len(token) == 64 and "rtc_heartbeat" not in token
+    assert connection.headers["access-control-expose-headers"] == "X-Voice-Connection"
+    with TestClient(app) as anonymous:
+        assert anonymous.request("POST", path + "/voice-heartbeat", json={"connection_token": token}).status_code == 401
+    assert client.request("POST", path + "/voice-heartbeat", json={"connection_token": "0" * 64}).status_code == 409
+
+    call = db_session.get(RealtimeCall, "rtc_heartbeat")
+    call.hangup_at = datetime.now(timezone.utc) + timedelta(seconds=5)
+    soon = call.hangup_at.replace(tzinfo=None)
+    db_session.commit()
+    assert client.request("POST", path + "/voice-heartbeat", json={"connection_token": token}).status_code == 204
+    db_session.refresh(call)
+    assert call.hangup_at > soon
+
+    cleanup = "/api/v1/internal/voice-cleanup"
+    assert client.request("POST", cleanup).status_code == 401
+    assert client.request("POST", cleanup, headers={"Authorization": "Bearer invalid"}).status_code == 401
+    auth = {"Authorization": "Bearer test-cleanup-secret"}
+    assert client.request("POST", cleanup, headers=auth).status_code == 204
+    assert provider.call_count == 1
+
+    call.hangup_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+    assert client.request("POST", path + "/voice-heartbeat", json={"connection_token": token}).status_code == 409
+    assert client.request("POST", cleanup, headers=auth).status_code == 503
+    assert call.closed_at is None
+    assert client.request("POST", cleanup, headers=auth).status_code == 204
+    assert call.closed_at is not None
+    assert client.request("POST", cleanup, headers=auth).status_code == 204
+    assert provider.call_count == 3

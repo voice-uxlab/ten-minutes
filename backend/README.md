@@ -105,7 +105,7 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 ### 음성 종료
 
 사용자가 종료 버튼을 누르면 FastAPI가 OpenAI Realtime 연결에 종료 요청을 보냅니다.
-실패 시 같은 종료 요청을 다시 보낼 수 있습니다. 시간이 지났거나 브라우저가 갑자기
-닫혔을 때 실행되는 예약 종료는 없습니다.
+실패 시 같은 종료 요청을 다시 보낼 수 있습니다. 배포 환경에서는 [Supabase 예약 작업](../docs/deployment.md#음성-상담-배포)이
+브라우저의 연결 유지 신호가 끊긴 통화를 정리합니다.
 
 기본 한도는 계정당 동시 통화 1개, 상담당 연결 시도 4회, 계정당 하루 연결 시도 20회, 상담당 TTS 12,000자, 계정당 하루 TTS 60,000자, 상담당 동시 TTS 요청 4개다. 환경변수 `VOICE_CONNECTIONS_PER_CONSULTATION`, `VOICE_CONNECTIONS_PER_ACCOUNT_DAY`, `TTS_CHARACTERS_PER_CONSULTATION`, `TTS_CHARACTERS_PER_ACCOUNT_DAY`, `TTS_PARALLEL_REQUESTS`로 조정할 수 있다.
