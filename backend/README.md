@@ -89,6 +89,16 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 
 음성 상담은 `OPENAI_API_KEY`, `TYPECAST_API_KEY`, `TYPECAST_VOICE_ID`를 백엔드에서 읽습니다. 모델은 `OPENAI_REALTIME_MODEL`과 `TYPECAST_MODEL`로 설정합니다.
 
+음성 상담의 시스템 프롬프트는 OpenAI Realtime에 게시한 `voice-uxlab-lena`를 사용합니다. 로컬 백엔드와 Vercel 백엔드에 아래 값을 설정합니다. 프런트엔드의 `VITE_*` 설정에는 넣지 않습니다.
+
+```env
+OPENAI_REALTIME_PROMPT_ID=pmpt_6b05b9cb92ec819499e176f52029ce1e02bea492ff9326d0
+OPENAI_REALTIME_PROMPT_VERSION=5
+```
+
+버전을 명시하지 않으면 세션을 만들지 않습니다. `OPENAI_API_KEY`는 위 프롬프트 버전에 접근 가능한 프로젝트의 키여야 합니다. 앱에서 모델, 텍스트 출력, 한국어 전사, semantic VAD 및 함수 정의를 명시하므로 프롬프트의 중복 설정은 덮어씁니다. 들리는 음성은 기존 Typecast 설정을 사용합니다. 세션 시작 시 로컬 지시문을 보내지 않습니다. [기존 프롬프트](app/prompts/tarot_reader.md)는 보관용이며 자동 대체용이 아닙니다. 별도 리포트 응답의 지시문은 유지합니다.
+
+
 ## 구현된 API 범위
 
 - 카카오 OAuth, HttpOnly 서비스 세션, 로그아웃, 사용자 설정

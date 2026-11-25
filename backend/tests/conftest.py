@@ -61,3 +61,16 @@ def authenticated_client(db_session):
     with TestClient(app) as client:
         client.cookies.set(get_settings().session_cookie_name, raw_token)
         yield client, user
+
+
+@pytest.fixture
+def hosted_realtime_prompt(monkeypatch):
+    from app.config import Settings
+
+    monkeypatch.setenv("OPENAI_REALTIME_PROMPT_ID", "pmpt_test")
+    monkeypatch.setenv("OPENAI_REALTIME_PROMPT_VERSION", "5")
+    loaded = Settings(_env_file=None)
+    settings = get_settings()
+    for name in ("openai_realtime_prompt_id", "openai_realtime_prompt_version"):
+        monkeypatch.setattr(settings, name, getattr(loaded, name))
+    return {"id": "pmpt_test", "version": "5"}
