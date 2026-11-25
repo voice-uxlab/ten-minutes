@@ -154,6 +154,26 @@ PUBLIC_WEB_ORIGIN=https://ten-minutes-dev.vercel.app
 - [ ] Preview Protection 상태에서 전체 흐름 확인
 
 
-## Realtime 종료 워커
+## Realtime 종료 예약
 
-음성 연결을 활성화하기 전에 Alembic 마이그레이션을 적용하고, API와 같은 PostgreSQL 및 OpenAI 프로젝트 설정으로 `python -m app.voice_worker`를 상시 실행한다. Vercel의 FastAPI 요청 프로세스와 분리된 워커 실행 환경이 필요하다. 워커의 상태가 확인되기 전까지 API는 새 음성 연결을 거절한다.
+배포 대상 DB에 마이그레이션 `20261125_0007`까지 적용합니다. Google Cloud Tasks에 환경별
+큐를 만들고 일시적 실패 시 재시도하도록 설정합니다. 재시도 기간은 10분보다 길게 설정합니다.
+예약을 등록하는 서비스 계정에는 큐의 **Cloud Tasks Enqueuer**와 콜백용 서비스 계정에 대한
+**Service Account User** 권한을 부여합니다. Cloud Tasks 서비스 에이전트가 콜백용 계정의
+ID 토큰을 발급할 수 있도록 설정합니다. 새 연결은 종료 예약이 확인된 뒤 열립니다.
+
+| 백엔드 환경변수 | 용도 |
+|---|---|
+| `VOICE_TASKS_QUEUE` | `projects/PROJECT/locations/REGION/queues/QUEUE` 형식의 큐 이름 |
+| `VOICE_TASKS_CREDENTIALS_JSON` | 큐에 작업을 등록할 서비스 계정의 JSON 자격증명 |
+| `VOICE_TASKS_INVOKER_EMAIL` | 내부 종료 API를 호출할 전용 서비스 계정 이메일 |
+| `BACKEND_ORIGIN` | Cloud Tasks에서 호출할 HTTPS 백엔드 주소 |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | Vercel 배포 보호가 켜져 있으면 사용하는 서버 측 자동화 키 |
+
+큐에서 `POST /api/v1/internal/voice-hangup`으로 요청이 도달하고 콜백 인증에 성공하는지
+배포 환경에서 확인합니다. 브라우저를 닫은 테스트 통화에 종료 예약이 도착하고 DB의
+`realtime_calls.closed_at`이 기록되는지 확인한 뒤 음성 상담을 엽니다. 상시 종료 워커를
+사용 중인 환경은 전환 전에 기존 통화를 모두 종료합니다.
+
+[Cloud Tasks HTTP 작업 설정](https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks) ·
+[Vercel 자동화용 배포 보호 설정](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)
