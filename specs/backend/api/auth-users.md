@@ -18,7 +18,7 @@
 
 **Request**
 
-- Path `provider: Literal["kakao", "naver", "openai"]`
+- Path `provider: Literal["kakao"]`
 - JSON body 없음
 
 **Response**

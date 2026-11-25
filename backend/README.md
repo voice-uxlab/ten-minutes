@@ -1,6 +1,6 @@
 # Ten Minutes Backend
 
-FastAPI 기반의 상담, 카드, 리포트, 공유 API입니다. OpenAI는 Realtime 음성 상담에만 사용하며 로그인 Provider는 카카오와 네이버만 지원합니다.
+FastAPI 기반의 상담, 카드, 리포트, 공유 API입니다. OpenAI는 Realtime 음성 상담에만 사용하며 로그인 Provider는 카카오만 지원합니다.
 
 ## 로컬 실행
 
@@ -23,7 +23,7 @@ uv run uvicorn app.main:app --reload --port 8000
 서버 실행 후 `http://localhost:8000/docs`에서 API별 요청 파라미터, 응답 필드와 상태 코드
 예시를 확인할 수 있습니다. 테스트하려면 API 항목을 펼치고 `Try it out`을 누른 뒤 값을
 입력해 `Execute`를 실행합니다. 인증이 필요한 API는 먼저 같은 브라우저에서 카카오 또는
-네이버 로그인을 완료해야 HttpOnly 세션 쿠키가 자동으로 전달됩니다.
+카카오 로그인을 완료해야 HttpOnly 세션 쿠키가 자동으로 전달됩니다.
 
 - `400`: OAuth state나 목록 cursor처럼 요청 자체가 올바르지 않음
 - `401`: 서비스 세션이 없거나 만료되어 로그인 필요
@@ -91,7 +91,7 @@ OAuth Provider의 프로필 닉네임은 상담용 `nickname`과 구분합니다
 
 ## 구현된 API 범위
 
-- 카카오/네이버 OAuth, HttpOnly 서비스 세션, 로그아웃, 사용자 설정
+- 카카오 OAuth, HttpOnly 서비스 세션, 로그아웃, 사용자 설정
 - 상담 생성/목록/조회/종료
 - 78장 서버 덱, 4개 스프레드, 중복 없는 3장 확정, 카드 순차 공개
 - FastAPI가 생성·종료하는 OpenAI Realtime WebRTC 연결과 상담 도구, Typecast 1.3배 WAV 스트리밍 프록시

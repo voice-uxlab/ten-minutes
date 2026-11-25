@@ -22,8 +22,8 @@ type AuthUser = Pick<
   "nickname" | "onboarding_required" | "provider"
 >;
 
-export function authorizeUrl(provider: "naver" | "kakao") {
-  return `${apiOrigin}/auth/${provider}/authorize`;
+export function authorizeUrl() {
+  return `${apiOrigin}/auth/kakao/authorize`;
 }
 
 export const authOptions = {

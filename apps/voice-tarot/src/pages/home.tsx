@@ -21,13 +21,11 @@ import { BrandHeader, MetallicIcon, Reader, Panel } from "@/components/tarot";
 
 const loginAttemptKey = "voice-tarot:login-attempt";
 const recentLoginKey = "voice-tarot:recent-login";
-const loginProviders = { naver: "네이버", kakao: "카카오" } as const;
-type LoginProvider = keyof typeof loginProviders;
 const aiProcessing =
   "음성 타로 상담을 위해 내 음성을 OpenAI에, AI 답변 텍스트를 Typecast에 전송하여 처리하는 데 동의합니다.";
 
-function loginProvider(provider: string | null): LoginProvider | null {
-  return provider === "naver" || provider === "kakao" ? provider : null;
+function loginProvider(provider: string | null): "kakao" | null {
+  return provider === "kakao" ? provider : null;
 }
 
 function LandingIntro() {
@@ -100,9 +98,8 @@ function Login({ checking = false }: { checking?: boolean }) {
     if (checking) return;
     const consumeAttempt = () => {
       const provider = loginProvider(sessionStorage.getItem(loginAttemptKey));
-      if (!provider) return;
-      setAttempt(provider);
       sessionStorage.removeItem(loginAttemptKey);
+      if (provider) setAttempt(provider);
     };
     consumeAttempt();
     window.addEventListener("pageshow", consumeAttempt);
@@ -117,10 +114,10 @@ function Login({ checking = false }: { checking?: boolean }) {
     params.delete("auth_error");
     navigate({ pathname, search: params.toString(), hash }, { replace: true });
   }, [hash, navigate, pathname, search]);
-  function startLogin(provider: LoginProvider) {
+  function startLogin() {
     setAttempt(null);
     setAuthError(null);
-    sessionStorage.setItem(loginAttemptKey, provider);
+    sessionStorage.setItem(loginAttemptKey, "kakao");
   }
   return (
     <section
@@ -129,27 +126,15 @@ function Login({ checking = false }: { checking?: boolean }) {
       <LandingIntro />
       <div className="action-stack">
         {checking && <AuthCheckNotice />}
-        {(["naver", "kakao"] as const).map((provider) => {
-          const showRecovery =
-            attempt === provider ||
-            (!attempt && authError && provider === "naver");
-          return (
-            <a
-              key={provider}
-              className="button glass social-login-button"
-              href={authorizeUrl(provider)}
-              onClick={() => startLogin(provider)}
-              aria-describedby={
-                showRecovery ? "login-recovery-message" : undefined
-              }
-            >
-              {loginProviders[provider]}로 시작하기
-              {recentLogin === provider && (
-                <span className="recent-login-label">최근 로그인</span>
-              )}
-            </a>
-          );
-        })}
+        <a
+          className="button glass social-login-button"
+          href={authorizeUrl()}
+          onClick={startLogin}
+          aria-describedby={attempt || authError ? "login-recovery-message" : undefined}
+        >
+          카카오로 시작하기
+          {recentLogin && <span className="recent-login-label">최근 로그인</span>}
+        </a>
         {(attempt || authError) && (
           <p
             className="login-recovery"

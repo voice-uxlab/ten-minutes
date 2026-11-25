@@ -24,8 +24,6 @@ class Settings(BaseSettings):
 
     kakao_client_id: Optional[str] = None
     kakao_client_secret: Optional[str] = None
-    naver_client_id: Optional[str] = None
-    naver_client_secret: Optional[str] = None
 
     openai_api_key: Optional[str] = None
     openai_realtime_model: str = "gpt-realtime"

@@ -6,11 +6,6 @@ const ephemeralSecret = randomBytes(32),
     { provider: string; nonce: string; expires: number }
   >();
 const providers = {
-  naver: {
-    authorize: "https://nid.naver.com/oauth2.0/authorize",
-    token: "https://nid.naver.com/oauth2.0/token",
-    profile: "https://openapi.naver.com/v1/nid/me",
-  },
   kakao: {
     authorize: "https://kauth.kakao.com/oauth/authorize",
     token: "https://kauth.kakao.com/oauth/token",
@@ -87,12 +82,7 @@ export async function handleAuth(
   if (url.pathname === "/auth/me" && req.method === "GET")
     return json(200, {
       user: unpack(cookies(req).tarot_session)?.user || null,
-      providers: Object.fromEntries(
-        Object.keys(providers).map((p) => [
-          p,
-          !!config(p).id && (p !== "naver" || !!config(p).secret),
-        ]),
-      ),
+      providers: { kakao: !!config("kakao").id },
     });
   if (url.pathname === "/auth/logout" && req.method === "POST") {
     if (req.headers.origin && req.headers.origin !== origin())
@@ -100,12 +90,12 @@ export async function handleAuth(
     res.setHeader("Set-Cookie", cookie("tarot_session", "", 0));
     return json(200, { ok: true });
   }
-  const match = url.pathname.match(/^\/auth\/(naver|kakao)(\/callback)?$/);
+  const match = url.pathname.match(/^\/auth\/(kakao)(\/callback)?$/);
   if (!match || req.method !== "GET") return json(404, { error: "Not found" });
   const [, provider, callback] = match,
     settings = config(provider),
     p = providers[provider as keyof typeof providers];
-  if (!settings.id || (provider === "naver" && !settings.secret))
+  if (!settings.id)
     return redirect("/?auth_error=not_configured");
   const redirectUri = origin() + `/auth/${provider}/callback`;
   for (const [key, value] of pending)
@@ -155,16 +145,11 @@ export async function handleAuth(
         headers: { Authorization: `Bearer ${tokens.access_token}` },
         signal: AbortSignal.timeout(12000),
       }),
-      data = await profile.json();
+      member = await profile.json();
     if (!profile.ok) throw Error("profile");
-    const member = provider === "naver" ? data.response : data;
     if (!member?.id) throw Error("identity");
     const nickname = String(
-      provider === "naver"
-        ? member.nickname || "공주"
-        : member.kakao_account?.profile?.nickname ||
-            member.properties?.nickname ||
-            "공주",
+      member.kakao_account?.profile?.nickname || member.properties?.nickname || "공주",
     ).slice(0, 40);
     const user = { id: `${provider}:${member.id}`, nickname, provider };
     return redirect("/", [

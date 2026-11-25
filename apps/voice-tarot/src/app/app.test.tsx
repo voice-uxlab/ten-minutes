@@ -102,9 +102,11 @@ test("cancelled social login offers retry", async () => {
   expect((await screen.findByRole("alert")).textContent).toContain(
     "로그인을 취소했어요.",
   );
-  const naver = screen.getByRole("link", { name: "네이버로 시작하기" });
+  const kakao = screen.getByRole("link", { name: "카카오로 시작하기" });
+  expect(screen.queryByRole("link", { name: /네이버/ })).toBeNull();
+  expect(kakao.getAttribute("href")).toMatch(/\/auth\/kakao\/authorize$/);
   const alert = screen.getByRole("alert");
-  expect(naver.getAttribute("aria-describedby")).toBe(alert.id);
+  expect(kakao.getAttribute("aria-describedby")).toBe(alert.id);
   expect(screen.queryByRole("link", { name: /로그인 다시 시도/ })).toBeNull();
   await waitFor(() => expect(window.location.search).toBe(""));
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
@@ -388,13 +390,13 @@ test("Christmas invitation opens without a report and leads to sign-in", async (
   await user.click(
     screen.getByRole("link", { name: "내 카드 세 장 뽑아보기" }),
   );
-  await screen.findByRole("link", { name: "네이버로 시작하기" });
+  await screen.findByRole("link", { name: "카카오로 시작하기" });
   expect(location.pathname).toBe("/login");
 });
 
 test("report history goes to sign-in for a signed-out visitor", async () => {
   history.replaceState({}, "", "/reports");
   render(<App />);
-  await screen.findByRole("link", { name: "네이버로 시작하기" });
+  await screen.findByRole("link", { name: "카카오로 시작하기" });
   expect(location.pathname).toBe("/login");
 });
