@@ -1,5 +1,46 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    {
+      "source": "/auth/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "ten-minutes-dev\\.vercel\\.app"
+        }
+      ],
+      "destination": "https://ten-minutes-api-git-dev-voice-uxlab.vercel.app/auth/:path*"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "ten-minutes-dev\\.vercel\\.app"
+        }
+      ],
+      "destination": "https://ten-minutes-api-git-dev-voice-uxlab.vercel.app/api/v1/:path*"
+    },
+    {
+      "source": "/auth/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "ten-minutes-tarot\\.vercel\\.app"
+        }
+      ],
+      "destination": "https://ten-minutes-api.vercel.app/auth/:path*"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "ten-minutes-tarot\\.vercel\\.app"
+        }
+      ],
+      "destination": "https://ten-minutes-api.vercel.app/api/v1/:path*"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
