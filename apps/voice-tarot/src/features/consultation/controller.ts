@@ -156,7 +156,6 @@ export class Consultation {
   private interrupted = false;
   private responseId = "";
   private responseContext?: NoteContext;
-  private caption = "";
   private realtimeSpeechBuffer = "";
   private stopped = false;
   private warned = false;
@@ -578,7 +577,6 @@ export class Consultation {
       if (this.responses.has(r.id)) return;
       this.responses.add(r.id);
       this.responseContext = noteContext(s);
-      this.caption = "";
       this.realtimeSpeechBuffer = "";
       this.responseId = r.id;
       this.responding = true;
@@ -588,29 +586,15 @@ export class Consultation {
     const current =
       e.response_id === this.responseId && !this.interrupted && !this.stopped;
     if (e.type === "response.output_text.delta" && current) {
-      this.caption += e.delta || "";
       this.realtimeSpeechBuffer += e.delta || "";
-      let boundary: RegExpMatchArray | null;
-      while (
-        (boundary = this.realtimeSpeechBuffer.match(
-          /[.!?。！？]+(?:[”’"'])?(?=\s|$)/,
-        ))
-      ) {
-        const end = boundary.index! + boundary[0].length;
-        const sentence = this.realtimeSpeechBuffer.slice(0, end);
-        this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(end);
-        if (/[\p{L}\p{N}]/u.test(sentence)) {
-          this.speech?.append(sentence, this.responseId);
-        }
-      }
     }
     if (e.type === "response.output_text.done" && current) {
-      const text = displaySpeech(e.text || "");
+      const text = displaySpeech(e.text || this.realtimeSpeechBuffer);
+      this.realtimeSpeechBuffer = "";
       s.transcript.push("레나: " + text);
       appendNote(s, "assistant", text, this.responseContext);
-      if (/[\p{L}\p{N}]/u.test(this.realtimeSpeechBuffer))
-        this.speech?.append(this.realtimeSpeechBuffer, this.responseId);
-      this.realtimeSpeechBuffer = "";
+      if (/[\p{L}\p{N}]/u.test(text))
+        this.speech?.append(text, this.responseId);
       this.persist();
       const context = this.responseContext;
       if (context?.stage === "reading" && context.focusSlots.length === 1)

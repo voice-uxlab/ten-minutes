@@ -300,16 +300,18 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
     response_id: "spoken",
     delta: "살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended).toEqual([["카드의 상징을 살펴볼게.", "spoken"]]);
-  expect(controller.getSnapshot().caption).toBe("");
-  audioMock.playback("카드의 상징을 살펴볼게.");
-  expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게.");
+  expect(audioMock.appended).toHaveLength(0);
   await controller.event({
     type: "response.output_text.done",
     response_id: "spoken",
     text: "카드의 상징을 살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended.at(-1)).toEqual([" 마지막 말", "spoken"]);
+  expect(audioMock.appended).toEqual([
+    ["카드의 상징을 살펴볼게. 마지막 말", "spoken"],
+  ]);
+  expect(controller.getSnapshot().caption).toBe("");
+  audioMock.playback("카드의 상징을 살펴볼게. 마지막 말");
+  expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게. 마지막 말");
   await emit(
     "review_question",
     { question: "오늘 주목할 점?", spreadId: "situation" },

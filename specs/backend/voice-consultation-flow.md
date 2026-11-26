@@ -78,7 +78,7 @@ sequenceDiagram
 
 이 시퀀스에는 정상 통화, 끼어들기, 재연결, 종료 순서만 표시한다. DB 상태 변경과 카드 공개 조건, 인증 정보, 이벤트 이름, 오류 코드는 아래 표와 REST API 상세 명세에서 확인한다.
 
-Realtime instructions와 카드 관련 tool schema에는 상담에 저장된 `expected_card_count`와 `positions`를 전달한다. 고정값 3을 프롬프트나 FE 로직에 중복 하드코딩하지 않는다. OpenAI Realtime은 `text`만 출력하고, FE가 문장 단위로 Typecast 요청과 재생 순서를 관리한다.
+Realtime instructions와 카드 관련 tool schema에는 상담에 저장된 `expected_card_count`와 `positions`를 전달한다. 고정값 3을 프롬프트나 FE 로직에 중복 하드코딩하지 않는다. OpenAI Realtime은 `text`만 출력한다. FE는 답변 텍스트가 완성되면 Typecast 합성을 요청하고, 500자를 넘는 답변은 나눠 순서대로 재생한다.
 
 OpenAI가 텍스트 생성을 끝내도 Typecast 재생은 남아 있을 수 있다. 사용자가 끼어들면 FE는 재생하지 않은 오디오를 버리고 OpenAI 응답도 취소한다. 이때 OpenAI 대화에 저장된 텍스트와 사용자가 들은 내용이 달라질 수 있으므로 후속 응답은 실통화로 테스트한다.
 
