@@ -590,18 +590,21 @@ export class Consultation {
     if (e.type === "response.output_text.delta" && current) {
       this.caption += e.delta || "";
       this.realtimeSpeechBuffer += e.delta || "";
-      let boundary: RegExpMatchArray | null;
-      while (
-        (boundary = this.realtimeSpeechBuffer.match(
-          /[.!?。！？]+(?:[”’"'])?(?=\s|$)/,
-        ))
-      ) {
-        const end = boundary.index! + boundary[0].length;
-        const sentence = this.realtimeSpeechBuffer.slice(0, end);
-        this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(end);
-        if (/[\p{L}\p{N}]/u.test(sentence)) {
-          this.speech?.append(sentence, this.responseId);
+      // Batch short sentences from one reply before sending them to Typecast.
+      const targetLength = 100;
+      if (this.realtimeSpeechBuffer.length >= targetLength) {
+        let consumed = 0;
+        for (const boundary of this.realtimeSpeechBuffer.matchAll(
+          /[.!?。！？]+(?:[”’"'])?(?=\s|$)/g,
+        )) {
+          const end = boundary.index + boundary[0].length;
+          if (end - consumed < targetLength) continue;
+          const segment = this.realtimeSpeechBuffer.slice(consumed, end);
+          if (/[\p{L}\p{N}]/u.test(segment))
+            this.speech?.append(segment, this.responseId);
+          consumed = end;
         }
+        this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(consumed);
       }
     }
     if (e.type === "response.output_text.done" && current) {
