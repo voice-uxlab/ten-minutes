@@ -22,17 +22,42 @@ type AuthUser = Pick<
   "nickname" | "onboarding_required" | "provider"
 >;
 
+export class AuthSessionError extends FastApiError {
+  constructor(
+    readonly cookie: "missing" | "rejected" | "unknown",
+    readonly requestId?: string,
+  ) {
+    super("로그인 상태를 확인하지 못했어요.", 401);
+  }
+}
+
 export function authorizeUrl() {
   return `${apiOrigin}/auth/kakao/authorize`;
 }
 
 export const authOptions = {
   queryKey: ["auth"],
+  retry: (failureCount: number, error: Error) =>
+    !(error instanceof AuthSessionError) && failureCount < 1,
   queryFn: async ({
     signal,
   }: QueryFunctionContext): Promise<AuthUser | null> => {
     const response = await fetchApi(userPath, { signal });
-    if (response.status === 401) return null;
+    if (response.status === 401) {
+      const body = await response.json().catch(() => null);
+      const message = body?.error?.message;
+      const requestId = body?.error?.request_id;
+      throw new AuthSessionError(
+        message === "The session cookie was missing."
+          ? "missing"
+          : message === "The session cookie was rejected."
+            ? "rejected"
+            : "unknown",
+        typeof requestId === "string" && /^req_[a-f0-9]{32}$/.test(requestId)
+          ? requestId
+          : undefined,
+      );
+    }
     if (!response.ok)
       throw new FastApiError("로그인 상태를 확인하지 못했어요.", response.status);
     const member: MemberProfile = await response.json();

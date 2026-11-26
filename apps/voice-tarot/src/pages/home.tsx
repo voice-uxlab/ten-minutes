@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createConsultation, reportsKey } from "@/api/consultations";
 import { FastApiError } from "@/api/client";
 import {
+  AuthSessionError,
   authOptions,
   authorizeUrl,
   consentVersion,
@@ -88,11 +89,13 @@ function AuthCheckNotice() {
 function Login({
   checking = false,
   lookupStatus,
+  sessionFailure,
 }: {
   checking?: boolean;
   lookupStatus?: number | "unavailable";
+  sessionFailure?: Pick<AuthSessionError, "cookie" | "requestId">;
 }) {
-  const { pathname, search, hash } = useLocation();
+  const { pathname, search, hash, state } = useLocation();
   const navigate = useNavigate();
   const [authError, setAuthError] = useState(() =>
     new URLSearchParams(search).get("auth_error"),
@@ -100,9 +103,12 @@ function Login({
   const [attempt, setAttempt] = useState(() =>
     loginProvider(sessionStorage.getItem(loginAttemptKey)),
   );
+  const [sessionIssued, setSessionIssued] = useState(() =>
+    new URLSearchParams(search).get("auth_callback") === "session_issued",
+  );
   const [retried, setRetried] = useState(false);
   const recentLogin = loginProvider(localStorage.getItem(recentLoginKey));
-  const showRecovery = !checking && Boolean(attempt || authError);
+  const showRecovery = !checking && Boolean(attempt || authError || sessionIssued);
   const status = retried ? undefined : lookupStatus;
   let diagnostic = "OAuth 복귀 후 로그인 상태를 확인하지 못했어요. (OAUTH_RETURN_UNCONFIRMED)";
   if (authError === "failed") {
@@ -131,13 +137,16 @@ function Login({
     if (pathname.toLowerCase().replace(/\/+$/, "") !== "/login") return;
     const params = new URLSearchParams(search);
     const error = params.get("auth_error");
-    if (error === null) return;
-    setAuthError(error);
+    if (error === null && !params.has("auth_callback")) return;
+    if (error !== null) setAuthError(error);
+    if (params.get("auth_callback") === "session_issued") setSessionIssued(true);
     params.delete("auth_error");
-    navigate({ pathname, search: params.toString(), hash }, { replace: true });
-  }, [hash, navigate, pathname, search]);
+    params.delete("auth_callback");
+    navigate({ pathname, search: params.toString(), hash }, { replace: true, state });
+  }, [hash, navigate, pathname, search, state]);
   function startLogin() {
     setRetried(true);
+    setSessionIssued(false);
     setAttempt(null);
     setAuthError(null);
     sessionStorage.setItem(loginAttemptKey, "kakao");
@@ -170,6 +179,21 @@ function Login({
                 : "소셜 로그인을 완료할 수 없습니다."}
             </strong>
             {authError !== "cancelled" && <span>{diagnostic}</span>}
+            {authError !== "cancelled" && (
+              <span>{sessionIssued ? "콜백 응답에서 세션 쿠키 발급 확인" : "콜백의 세션 쿠키 발급 여부 미확인"}</span>
+            )}
+            {status === 401 && (
+              <span>
+                {sessionFailure?.cookie === "missing"
+                  ? "API에 세션 쿠키가 도착하지 않았어요. (SESSION_COOKIE_MISSING)"
+                  : sessionFailure?.cookie === "rejected"
+                    ? "API가 받은 세션 쿠키를 유효한 세션으로 확인하지 못했어요. (SESSION_COOKIE_REJECTED)"
+                    : "API의 세션 쿠키 수신 여부를 확인할 수 없어요. (SESSION_COOKIE_UNKNOWN)"}
+              </span>
+            )}
+            {!retried && sessionFailure?.requestId && (
+              <span>요청 ID {sessionFailure.requestId}</span>
+            )}
             <span>다시 로그인해 주세요.</span>
           </p>
         )}
@@ -204,6 +228,7 @@ export function Onboarding() {
   if (auth.isPending) {
     return <LoadingPage message="로그인 상태를 확인하고 있어요." />;
   }
+  if (auth.error instanceof AuthSessionError) return <Navigate to="/login" replace />;
   if (auth.isError) {
     return (
       <p role="alert">
@@ -315,19 +340,26 @@ export function Home() {
     [consent, setConsent] = useState(false),
     [record, setRecord] = useState(false),
     [error, setError] = useState("");
-  const { pathname, search, state } = useLocation();
+  const { pathname, search, hash, state } = useLocation();
   const isLogin = pathname.toLowerCase().replace(/\/+$/, "") === "/login";
   const queryClient = useQueryClient();
   const auth = useQuery({ ...authOptions, enabled: !isLogin });
+  const hasAuthError = new URLSearchParams(search).has("auth_error");
+  const confirmedUser = auth.error instanceof AuthSessionError ? null : auth.data;
   useEffect(() => {
-    if (isLogin || !auth.data || new URLSearchParams(search).has("auth_error"))
+    if (isLogin || !confirmedUser || hasAuthError)
       return;
     const provider =
-      loginProvider(auth.data.provider) ??
+      loginProvider(confirmedUser.provider) ??
       loginProvider(sessionStorage.getItem(loginAttemptKey));
     if (provider) localStorage.setItem(recentLoginKey, provider);
     sessionStorage.removeItem(loginAttemptKey);
-  }, [auth.data, isLogin, search]);
+    const params = new URLSearchParams(search);
+    if (!confirmedUser.onboarding_required && params.has("auth_callback")) {
+      params.delete("auth_callback");
+      navigate({ pathname, search: params.toString(), hash }, { replace: true });
+    }
+  }, [confirmedUser, hasAuthError, hash, isLogin, navigate, pathname, search]);
   const signOut = useMutation({
     mutationFn: logout,
     onSuccess: () => {
@@ -366,11 +398,10 @@ export function Home() {
       setError(e instanceof Error ? e.message : "음성을 준비하지 못했어요.");
     }
   }
-  const hasAuthError = new URLSearchParams(search).has("auth_error");
-  if (!isLogin && !hasAuthError && auth.data?.onboarding_required) {
+  if (!isLogin && !hasAuthError && confirmedUser?.onboarding_required) {
     return <Navigate to="/onboarding" replace />;
   }
-  const nick = auth.data && (auth.data.nickname || "공주");
+  const nick = confirmedUser && (confirmedUser.nickname || "공주");
   if (isLogin || hasAuthError || !nick) {
     const checking = !isLogin && !hasAuthError && auth.isPending;
     const lookupStatus = isLogin
@@ -382,13 +413,18 @@ export function Home() {
           : auth.data === null
             ? 401
             : undefined;
+    const sessionFailure = isLogin
+      ? state?.sessionFailure
+      : auth.error instanceof AuthSessionError
+        ? { cookie: auth.error.cookie, requestId: auth.error.requestId }
+        : undefined;
     return (
       <>
-        <Login checking={checking} lookupStatus={lookupStatus} />
+        <Login checking={checking} lookupStatus={lookupStatus} sessionFailure={sessionFailure} />
         {!isLogin && !checking && (
           <Navigate
-            to={`/login${hasAuthError ? search : ""}`}
-            state={{ lookupStatus }}
+            to={`/login${hasAuthError || new URLSearchParams(search).has("auth_callback") ? search : ""}`}
+            state={{ lookupStatus, sessionFailure }}
             replace
           />
         )}

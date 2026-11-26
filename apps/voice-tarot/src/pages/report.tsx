@@ -1,7 +1,7 @@
 import { Cards } from "@/components/cards";
 import { useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { authOptions } from "@/api/auth";
+import { AuthSessionError, authOptions } from "@/api/auth";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { listReports, reportOptions, reportsKey } from "@/api/consultations";
 import { FastApiError } from "@/api/client";
@@ -107,9 +107,10 @@ export function ReportPage() {
 
 export function ReportsPage() {
   const auth = useQuery(authOptions);
+  const user = auth.error instanceof AuthSessionError ? null : auth.data;
   const history = useInfiniteQuery({
     queryKey: reportsKey,
-    enabled: !!auth.data,
+    enabled: !!user,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => listReports(pageParam, signal),
     getNextPageParam: (page) => page.next_cursor ?? undefined,
@@ -119,7 +120,7 @@ export function ReportsPage() {
       <LoadingPage message="로그인 상태를 확인하고 있어요." />
     );
   }
-  if (!auth.data) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
   const reports =
     history.data?.pages.flatMap((page) =>
       page.items.filter((item) => item.report_status === "COMPLETED"),
