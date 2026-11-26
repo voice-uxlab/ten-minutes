@@ -462,9 +462,30 @@
 .listening-message {
   margin-top: 5px;
 }
-.listening-message .panel-body > p {
+.listening-message .call-captions p {
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+.call-captions {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 44px;
+  block-size: calc(6em + 44px);
+}
+.call-captions .caption-scroll {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  overflow-wrap: anywhere;
+}
+.call-captions .caption-scroll p {
+  margin: 0;
+  white-space: pre-line;
+}
+.call-captions .caption-scroll p + p {
+  margin-block-start: 0.5em;
+}
+.call-captions .caption-toggle {
+  justify-self: end;
+  min-height: 44px;
 }
 .listening-wave {
   display: grid;
@@ -517,7 +538,7 @@
   letter-spacing: -0.02em;
 }
 .call-page[data-phase="question"] .panel-body > p,
-.call-page .reading-message .panel-body > p,
+.call-page .reading-message .call-captions p,
 .ended-page .panel-body p {
   letter-spacing: -0.02em;
 }
