@@ -279,6 +279,27 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   );
   expect(saved.report?.readings).toHaveLength(3);
 });
+test("batches 100 characters through the next sentence ending and flushes the tail", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
+  await controller.start();
+  const id = "batched";
+  await controller.event({ type: "response.created", response: { id } });
+  const delta = (text: string) => controller.event({
+    type: "response.output_text.delta", response_id: id, delta: text,
+  });
+  const prefix = "가".repeat(98) + ".";
+  await delta(prefix);
+  await delta(" 다음");
+  expect(audioMock.appended).toHaveLength(0);
+  await delta(" 문장. 끝");
+  expect(audioMock.appended).toEqual([[prefix + " 다음 문장.", id]]);
+  await controller.event({
+    type: "response.output_text.done", response_id: id, text: prefix + " 다음 문장. 끝",
+  });
+  expect(audioMock.appended.at(-1)).toEqual([" 끝", id]);
+});
+
 test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {
   mockRealtime();
   controller = new Consultation(await session());
@@ -300,16 +321,17 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
     response_id: "spoken",
     delta: "살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended).toEqual([["카드의 상징을 살펴볼게.", "spoken"]]);
+  expect(audioMock.appended).toHaveLength(0);
   expect(controller.getSnapshot().caption).toBe("");
-  audioMock.playback("카드의 상징을 살펴볼게.");
-  expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게.");
   await controller.event({
     type: "response.output_text.done",
     response_id: "spoken",
     text: "카드의 상징을 살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended.at(-1)).toEqual([" 마지막 말", "spoken"]);
+  const combined = "카드의 상징을 살펴볼게. 마지막 말";
+  expect(audioMock.appended).toEqual([[combined, "spoken"]]);
+  audioMock.playback(combined);
+  expect(controller.getSnapshot().caption).toBe(combined);
   await emit(
     "review_question",
     { question: "오늘 주목할 점?", spreadId: "situation" },
