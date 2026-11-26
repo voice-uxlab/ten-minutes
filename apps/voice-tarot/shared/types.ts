@@ -75,6 +75,7 @@ export interface Session extends Reading {
   connected?: boolean;
   report?: Report;
   reportPending?: boolean;
+  hasReportDraft?: boolean;
   ended?: boolean;
 }
 export interface ReadingResult {

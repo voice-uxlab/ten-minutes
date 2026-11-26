@@ -8,6 +8,7 @@ import { Consultation, type RealtimeEvent } from "./controller";
 import { emptyReading, type Session } from "@/api/types";
 import { loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
+import { consultationOptions } from "@/api/consultations";
 const audioMock = vi.hoisted(() => ({
   busy: false,
   state: (_busy: boolean) => {
@@ -84,6 +85,7 @@ beforeEach(async () => {
   store = new ReadingStore(dir, () =>
     cards.map((c) => ({ ...c, reversed: false })),
   );
+  const revealed = new Map<number, object>();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
@@ -129,20 +131,27 @@ beforeEach(async () => {
         const slot = Number(reveal[1]);
         const { state } = await store.request({ id: storeId, action: "get" });
         const card = state.cards[slot - 1];
-        return Response.json({
-          card: {
-            slot,
-            picked_number: card.number,
-            position: card.position,
-            revealed: true,
-            card_id: card.id,
-            name: card.name,
-            keywords: [card.upright],
-          },
-        });
+        const result = {
+          slot,
+          picked_number: card.number,
+          position: card.position,
+          revealed: true,
+          card_id: card.id,
+          name: card.name,
+          keywords: [card.upright],
+        };
+        revealed.set(slot, result);
+        return Response.json({ card: result });
       }
-      if (path === `${pathPrefix}/end` || path === `${pathPrefix}/report`)
-        return Response.json({});
+      if (path === `${pathPrefix}/end`)
+        return Response.json({
+          id: consultationId,
+          status: "ENDED",
+          cards: [...revealed.values()],
+          report_status: null,
+        });
+      if (path === `${pathPrefix}/report` && options?.method === "PUT")
+        return Response.json(JSON.parse(String(options.body)), { status: 201 });
       throw Error(`Unexpected request: ${path}`);
     }),
   );
@@ -478,6 +487,220 @@ test.each([
     );
   },
 );
+
+test.each([503, "lost"] as const)(
+  "saves the report with the server's revealed slots after an end response of %s",
+  async (failure) => {
+    controller = new Consultation(await session());
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (path, options) => {
+      if (path === `${pathPrefix}/end`) {
+        if (failure === "lost") throw new TypeError("Network request failed");
+        return Response.json(
+          { error: { code: "VOICE_HANGUP_RETRY" } },
+          { status: failure },
+        );
+      }
+      if (path === pathPrefix)
+        return Response.json({
+          id: consultationId,
+          status: "ENDED",
+          cards: [
+            {
+              slot: 1,
+              picked_number: 7,
+              position: "현재",
+              revealed: true,
+              card_id: 17,
+              name: "별",
+              keywords: ["희망"],
+            },
+          ],
+          report_status: null,
+        });
+      return originalFetch(path, options);
+    });
+
+    await controller.end();
+
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => path)).toEqual([
+      `${pathPrefix}/end`,
+      pathPrefix,
+      `${pathPrefix}/report`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "ended",
+      session: { reportPending: false, report: { readings: [{ slot: 1 }] } },
+    });
+  },
+);
+
+test("keeps the draft and waits to save when the end commit is unconfirmed", async () => {
+  controller = new Consultation(await session());
+  vi.mocked(fetch).mockImplementation(async (path) => {
+    if (path === `${pathPrefix}/end`) return new Response(null, { status: 503 });
+    if (path === pathPrefix) return Response.json({ status: "ACTIVE" });
+    throw Error(`Unexpected request: ${path}`);
+  });
+
+  await controller.end();
+
+  expect(vi.mocked(fetch).mock.calls.map(([path]) => path)).toEqual([
+    `${pathPrefix}/end`,
+    pathPrefix,
+  ]);
+  expect(controller.getSnapshot()).toMatchObject({
+    phase: "ending",
+    endUnconfirmed: true,
+    session: { reportPending: true },
+  });
+  expect(loadSession(consultationId)?.reportPending).toBe(true);
+});
+
+test.each(["retry", "reload"] as const)(
+  "recovers a saved report after its PUT response is lost on %s",
+  async (recovery) => {
+    controller = new Consultation(await session());
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (path, options) => {
+      if (path === pathPrefix)
+        return Response.json({
+          id: consultationId,
+          status: "ENDED",
+          cards: [],
+          report_status: "COMPLETED",
+        });
+      if (path === `${pathPrefix}/report`) {
+        if (options?.method === "PUT")
+          throw new TypeError("Network request failed");
+        return Response.json({
+          situation_summary: "저장된 요약",
+          queen_line: "저장된 조언",
+          readings: [],
+        });
+      }
+      return originalFetch(path, options);
+    });
+
+    await controller.end();
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "ending",
+      endUnconfirmed: false,
+      session: { ended: true, reportPending: true },
+    });
+    expect(loadSession(consultationId)?.reportPending).toBe(true);
+
+    if (recovery === "reload") {
+      const session = await consultationOptions(consultationId).queryFn({
+        signal: new AbortController().signal,
+      });
+      expect(session).toMatchObject({
+        reportPending: false,
+        report: { summary: "저장된 요약" },
+      });
+    } else {
+      await controller.saveReport();
+      expect(controller.getSnapshot()).toMatchObject({
+        phase: "ended",
+        session: { reportPending: false, report: { summary: "저장된 요약" } },
+      });
+      expect(loadSession(consultationId)).toBeUndefined();
+    }
+    expect(
+      vi.mocked(fetch).mock.calls.map(([path, options]) => [path, options?.method]),
+    ).toEqual([
+      [`${pathPrefix}/end`, "POST"],
+      [`${pathPrefix}/report`, "PUT"],
+      [pathPrefix, undefined],
+      [`${pathPrefix}/report`, undefined],
+    ]);
+  },
+);
+
+test("saves the question and card checkpoint before queuing a server-generated report", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  const checkpoints = vi.fn();
+  const endRequests: unknown[] = [];
+  vi.mocked(fetch).mockImplementation(async (path, options) => {
+    if (path === `${pathPrefix}/report-draft`) {
+      checkpoints(JSON.parse(String(options?.body)));
+      return new Response(null, { status: 204 });
+    }
+    if (path === `${pathPrefix}/end`) {
+      const body = JSON.parse(String(options?.body));
+      endRequests.push(body);
+      if (!body.defer_voice_cleanup)
+        return Response.json({ error: { code: "VOICE_HANGUP_RETRY" } }, { status: 503 });
+      return Response.json({
+        id: consultationId,
+        status: "ENDED",
+        report_status: "PENDING",
+      });
+    }
+    if (path === `${pathPrefix}/report/generate`)
+      return new Response(null, { status: 204 });
+    return originalFetch(path, options);
+  });
+
+  async function completeCheckpoint(number: number, summary: string, readings: unknown[]) {
+    const requestId = `checkpoint-${number}`;
+    await vi.waitFor(() => expect(sends.some((event) => event.event_id === requestId)).toBe(true));
+    await controller.event({
+      type: "response.done",
+      response: {
+        id: `draft-${number}`,
+        status: "completed",
+        metadata: { purpose: "report", request_id: requestId },
+        output: [{
+          type: "function_call",
+          name: "write_report",
+          call_id: `draft-call-${number}`,
+          arguments: JSON.stringify({ summary, readings }),
+        }],
+      },
+    });
+  }
+
+  await controller.start();
+  await controller.command("review_question", {
+    question: "이직할까 남을까?",
+    spreadId: "decision",
+  });
+  await controller.command("confirm_question");
+  await completeCheckpoint(1, "이직을 고민하고 있어요.", []);
+  await vi.waitFor(() => expect(checkpoints).toHaveBeenCalledWith({
+    summary: "이직을 고민하고 있어요.",
+  }));
+  await controller.command("select_numbers", { picks: [7, 22, 51] });
+  await controller.command("confirm_cards");
+  await controller.command("reveal_card", { slot: 1 });
+  await controller.command("show_reading", { slot: 1 });
+  await controller.event({ type: "response.created", response: { id: "reading" } });
+  await controller.event({
+    type: "response.output_text.done",
+    response_id: "reading",
+    text: "지금 상황을 천천히 살펴봐.",
+  });
+  await completeCheckpoint(2, "이직 선택을 신중히 살피고 있어요.", [
+    { slot: 1, text: "서두르기 전에 현재 상황을 정리한다." },
+  ]);
+  await vi.waitFor(() => expect(checkpoints).toHaveBeenLastCalledWith({
+    summary: "이직 선택을 신중히 살피고 있어요.",
+    readings: [{ slot: 1, text: "서두르기 전에 현재 상황을 정리한다." }],
+  }));
+  await controller.end();
+
+  expect(controller.getSnapshot().phase).toBe("ended");
+  expect(endRequests).toEqual([
+    { reason: "USER", defer_voice_cleanup: true },
+    { reason: "USER" },
+  ]);
+  const paths = vi.mocked(fetch).mock.calls.map(([path]) => path);
+  expect(paths).toContain(`${pathPrefix}/report/generate`);
+  expect(paths).not.toContain(`${pathPrefix}/report`);
+});
 
 test("renews the current voice connection and stops heartbeats on dispose", async () => {
   mockRealtime();
