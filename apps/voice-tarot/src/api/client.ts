@@ -7,8 +7,15 @@ export const queryClient = new QueryClient({
 });
 export const apiOrigin =
   import.meta.env.VITE_AUTH_API_ORIGIN?.trim().replace(/\/+$/, "") || "";
+export const guestTokenKey = "voice-tarot:guest-token";
 export function fetchApi(path: string, options?: RequestInit) {
-  return fetch(`${apiOrigin}${path}`, { ...options, credentials: "include" });
+  const token = sessionStorage.getItem(guestTokenKey);
+  if (token) {
+    const headers = new Headers(options?.headers);
+    headers.set("Authorization", "Bearer " + token);
+    return fetch(`${apiOrigin}${path}`, { ...options, headers, credentials: "omit" });
+  }
+  return fetch(`${apiOrigin}${path}`, { credentials: "include", ...options });
 }
 export class FastApiError extends Error {
   constructor(

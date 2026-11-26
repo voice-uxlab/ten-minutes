@@ -43,7 +43,7 @@ app.add_middleware(
     allow_origins=[settings.public_web_origin.rstrip("/")],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Idempotency-Key"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
     expose_headers=[VOICE_CONNECTION_HEADER],
 )
 app.add_exception_handler(HTTPException, routing_error_handler)

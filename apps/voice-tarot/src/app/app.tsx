@@ -29,6 +29,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Home />} />
+              <Route path="/guest" element={<Home />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/sessions/:id" element={<SessionPage />} />
               <Route path="/sessions/:id/report" element={<ReportPage />} />

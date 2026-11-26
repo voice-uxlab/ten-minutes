@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     tts_parallel_requests: int = Field(default=4, ge=1)
 
 
+    guest_sessions_per_day: int = Field(default=100, ge=0)
     default_card_count: int = Field(default=3, ge=1, le=10)
     max_question_length: int = Field(default=300, ge=1, le=1000)
     max_tts_text_length: int = Field(default=500, ge=1, le=5000)
