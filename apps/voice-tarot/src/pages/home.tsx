@@ -17,7 +17,7 @@ import { saveSession } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PolicyDialog } from "@/components/ui/dialog";
-import { BrandHeader, MetallicIcon, Reader, Panel } from "@/components/tarot";
+import { BrandHeader, LoadingPage, LoadingWave, MetallicIcon, Reader, Panel } from "@/components/tarot";
 
 const loginAttemptKey = "voice-tarot:login-attempt";
 const recentLoginKey = "voice-tarot:recent-login";
@@ -75,7 +75,7 @@ function AuthCheckNotice() {
     <p className="auth-check-notice" role="status">
       {showNotice && (
         <>
-          로그인 상태를 확인 중이에요.
+          <LoadingWave />로그인 상태를 확인 중이에요.
           <br />
           잠시만 기다려 주세요.
         </>
@@ -178,7 +178,7 @@ export function Onboarding() {
     },
   });
   if (auth.isPending) {
-    return <p role="status">로그인 상태를 확인하고 있어요.</p>;
+    return <LoadingPage message="로그인 상태를 확인하고 있어요." />;
   }
   if (auth.isError) {
     return (
@@ -550,7 +550,7 @@ export function Home() {
         onClick={begin}
       >
         {create.isPending ? (
-          "상담 준비 중…"
+          <><LoadingWave />상담 준비 중…</>
         ) : (
           <>
             <MetallicIcon name="phone" />
