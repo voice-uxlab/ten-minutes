@@ -129,4 +129,4 @@ OPENAI_REALTIME_PROMPT_VERSION=5
 실패하면 저장된 메모로 기본 리포트를 작성합니다. 초안은 리포트 저장 시 삭제되며
 완료되지 않은 작업은 상담 기한 24시간 후부터 예약 정리 대상입니다.
 
-기본 한도는 계정당 동시 통화 1개, 상담당 연결 시도 4회, 계정당 하루 연결 시도 20회, 상담당 TTS 12,000자, 계정당 하루 TTS 60,000자, 상담당 동시 TTS 요청 4개다. 환경변수 `VOICE_CONNECTIONS_PER_CONSULTATION`, `VOICE_CONNECTIONS_PER_ACCOUNT_DAY`, `TTS_CHARACTERS_PER_CONSULTATION`, `TTS_CHARACTERS_PER_ACCOUNT_DAY`, `TTS_PARALLEL_REQUESTS`로 조정할 수 있다.
+기본 한도는 계정당 동시 통화 1개, 상담당 연결 시도 8회, 계정당 UTC 기준 하루 연결 시도 40회, 상담당 TTS 12,000자, 계정당 하루 TTS 60,000자, 상담당 동시 TTS 요청 4개다. 환경변수 `VOICE_CONNECTIONS_PER_CONSULTATION`, `VOICE_CONNECTIONS_PER_ACCOUNT_DAY`, `TTS_CHARACTERS_PER_CONSULTATION`, `TTS_CHARACTERS_PER_ACCOUNT_DAY`, `TTS_PARALLEL_REQUESTS`로 조정할 수 있다.
