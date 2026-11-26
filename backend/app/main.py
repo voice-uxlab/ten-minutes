@@ -4,10 +4,12 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
+from starlette.exceptions import HTTPException
+
 from .api import public_router, router
 from .auth import router as auth_router
 from .config import get_settings
-from .errors import APIError, api_error_handler, unhandled_error_handler, validation_error_handler
+from .errors import APIError, api_error_handler, current_request_id, routing_error_handler, unhandled_error_handler, validation_error_handler
 from .voice import VOICE_CONNECTION_HEADER
 
 
@@ -44,6 +46,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Idempotency-Key"],
     expose_headers=[VOICE_CONNECTION_HEADER],
 )
+app.add_exception_handler(HTTPException, routing_error_handler)
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.add_exception_handler(Exception, unhandled_error_handler)
@@ -52,7 +55,11 @@ app.add_exception_handler(Exception, unhandled_error_handler)
 @app.middleware("http")
 async def request_id(request: Request, call_next):
     request.state.request_id = request.headers.get("X-Request-Id", f"req_{uuid4().hex}")
-    response = await call_next(request)
+    token = current_request_id.set(request.state.request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        current_request_id.reset(token)
     response.headers["X-Request-Id"] = request.state.request_id
     return response
 

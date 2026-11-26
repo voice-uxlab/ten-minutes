@@ -1,14 +1,15 @@
 import hashlib
+import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
 import anyio
 import httpx
-from fastapi import APIRouter, Depends, Header, Path as PathParameter, Query, Response
+from fastapi import APIRouter, Depends, Header, Path as PathParameter, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -23,6 +24,7 @@ from .models import (
     ConsultationCard,
     ConsultationEvent,
     ConsultationReport,
+    ConsultationReportDraft,
     RealtimeCall,
     ShareLink,
     TarotCard,
@@ -30,6 +32,7 @@ from .models import (
     ensure_utc,
 )
 from .openapi import AUTHENTICATED_RESPONSES, PUBLIC_RESPONSES, error_response
+from .reports import mark_consultation_ended, process_due_report
 from .schemas import (
     CardRevealResponse,
     CardSelectionRequest,
@@ -47,7 +50,9 @@ from .schemas import (
     ReportResponse,
     SPREAD_POSITIONS,
     SaveReportRequest,
+    SaveReportDraftRequest,
     ShareLinkResponse,
+    TTSDiagnostics,
     TTSRequest,
     UpdateCurrentUserRequest,
     VoiceHeartbeatRequest,
@@ -72,6 +77,7 @@ from .voice import (
 )
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", responses=AUTHENTICATED_RESPONSES)
 public_router = APIRouter(prefix="/api/v1", tags=["shares"], responses=PUBLIC_RESPONSES)
 
@@ -408,27 +414,72 @@ def end_consultation(
     settings: Settings = Depends(get_settings),
 ):
     consultation = owned_consultation(db, consultation_id, user, lock=True)
-    if consultation.status != "ENDED":
-        consultation.status = "ENDED"
-        consultation.end_reason = body.reason
-        consultation.ended_at = datetime.now(timezone.utc)
-        db.execute(update(RealtimeCall).where(
-            RealtimeCall.consultation_id == consultation.id,
-            RealtimeCall.closed_at.is_(None),
-            RealtimeCall.hangup_at > consultation.ended_at,
-        ).values(hangup_at=consultation.ended_at))
+    mark_consultation_ended(db, consultation, body.reason, datetime.now(timezone.utc))
     result = consultation_response(consultation)
-    needs_hangup = bool(consultation.voice_reservation) or db.scalar(
+    needs_hangup = not body.defer_voice_cleanup and (bool(consultation.voice_reservation) or db.scalar(
         select(RealtimeCall.id).where(
             RealtimeCall.consultation_id == consultation.id, RealtimeCall.closed_at.is_(None)
         ).limit(1)
-    )
+    ))
     db.commit()
     if needs_hangup:
         if not settings.openai_api_key:
             raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
         close_consultation_calls(db, str(consultation_id), settings.openai_api_key)
     return result
+
+
+@router.put(
+    "/consultations/{consultation_id}/report-draft",
+    status_code=204,
+    tags=["reports"],
+    summary="Save a short consultation checkpoint",
+)
+def save_report_draft(
+    consultation_id: UUID,
+    body: SaveReportDraftRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    consultation = owned_consultation(db, consultation_id, user, lock=True)
+    active_consultation(consultation)
+    if consultation.report:
+        raise APIError(409, "REPORT_LOCKED", "The saved report cannot be overwritten.")
+    revealed = {card.slot for card in consultation.cards if card.revealed_at is not None}
+    if any(reading.slot not in revealed for reading in body.readings):
+        raise APIError(422, "INVALID_REPORT_READINGS", "Only revealed cards can have report notes.")
+    draft = consultation.report_draft
+    if draft is None:
+        draft = consultation.report_draft = ConsultationReportDraft(
+            run_at=consultation.call_ends_at,
+            expires_at=consultation.call_ends_at + timedelta(hours=24),
+            readings={},
+        )
+    if body.summary is not None:
+        draft.summary = body.summary
+    draft.readings = {
+        **draft.readings,
+        **{str(reading.slot): reading.text for reading in body.readings},
+    }
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post(
+    "/consultations/{consultation_id}/report/generate",
+    status_code=204,
+    tags=["reports"],
+    summary="Process a due report for an ended consultation",
+)
+def generate_consultation_report(
+    consultation_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+):
+    owned_consultation(db, consultation_id, user)
+    process_due_report(db, settings, str(consultation_id))
+    return Response(status_code=204)
 
 
 @router.put(
@@ -485,6 +536,7 @@ def save_report(
             readings=normalized_readings,
             queen_line=body.queen_line,
         )
+        consultation.report_draft = None
         db.commit()
         db.refresh(consultation)
     return report_response(consultation)
@@ -497,6 +549,7 @@ def save_report(
     summary="Get private report",
     description="Returns the question, card images, per-card readings, situation summary, and closing message to the consultation owner only.",
     responses={
+        202: {"description": "A report is pending generation"},
         404: error_response(
             404,
             examples={
@@ -514,6 +567,8 @@ def get_report(
 ):
     consultation = owned_consultation(db, consultation_id, user)
     if not consultation.report:
+        if consultation.status == "ENDED" and consultation.report_draft:
+            return Response(status_code=202, headers={"Cache-Control": "no-store"})
         raise APIError(404, "REPORT_NOT_FOUND", "The report was not found.")
     return report_response(consultation)
 
@@ -699,21 +754,36 @@ def voice_heartbeat(
     return Response(status_code=204)
 
 
-@router.post("/internal/voice-cleanup", status_code=204, include_in_schema=False)
-def voice_cleanup(
-    authorization: str = Header(default=""),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
+def authorize_scheduled_job(authorization: str, settings: Settings) -> None:
     secret = settings.voice_cleanup_secret
     scheme, _, token = authorization.partition(" ")
     if not secret or not token or scheme.lower() != "bearer" or not secrets.compare_digest(
         token.encode(), secret.get_secret_value().encode(),
     ):
         raise APIError(401, "VOICE_CLEANUP_UNAUTHORIZED", "A valid cleanup token is required.")
+
+
+@router.post("/internal/voice-cleanup", status_code=204, include_in_schema=False)
+def voice_cleanup(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    authorize_scheduled_job(authorization, settings)
     if not settings.openai_api_key:
         raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
     close_inactive_voice_calls(db, settings.openai_api_key)
+    return Response(status_code=204)
+
+
+@router.post("/internal/report-generation", status_code=204, include_in_schema=False)
+def scheduled_report_generation(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    authorize_scheduled_job(authorization, settings)
+    process_due_report(db, settings)
     return Response(status_code=204)
 
 
@@ -743,6 +813,7 @@ def voice_cleanup(
     },
 )
 async def tts_stream(
+    request: Request,
     body: TTSRequest,
     consultation_id: UUID = PathParameter(description="Active consultation ID for audio synthesis"),
     db: Session = Depends(get_db),
@@ -776,9 +847,10 @@ async def tts_stream(
             with anyio.move_on_after(5, shield=True):
                 await run_in_threadpool(release_tts, bind, consultation_key, lease)
 
+    started = anyio.current_time()
     forwarded = False
     try:
-        request = client.build_request(
+        provider_request = client.build_request(
             "POST",
             "https://api.typecast.ai/v1/text-to-speech/stream",
             headers={"X-API-KEY": settings.typecast_api_key},
@@ -796,9 +868,16 @@ async def tts_stream(
             },
         )
         with anyio.fail_after(max(0, min(15, end_time - anyio.current_time()))):
-            upstream = await client.send(request, stream=True)
+            upstream = await client.send(provider_request, stream=True)
         if not upstream.is_success:
-            raise APIError(502, "TTS_FAILED", "Speech synthesis failed.")
+            logger.warning(
+                "Typecast TTS failed request_id=%r upstream_status=%d elapsed_ms=%.0f",
+                request.state.request_id, upstream.status_code, (anyio.current_time() - started) * 1000,
+            )
+            raise APIError(
+                502, "TTS_FAILED", "Speech synthesis failed.",
+                diagnostics=TTSDiagnostics(reason="provider_http_error", upstream_status=upstream.status_code),
+            )
 
         async def chunks():
             iterator = upstream.aiter_bytes()
@@ -810,6 +889,12 @@ async def tts_stream(
                     yield chunk
             except StopAsyncIteration:
                 pass
+            except (httpx.RequestError, TimeoutError) as exc:
+                logger.error(
+                    "Typecast TTS interrupted request_id=%r stage=audio_stream error=%s elapsed_ms=%.0f",
+                    request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
+                )
+                raise
             finally:
                 await cleanup()
 
@@ -819,9 +904,23 @@ async def tts_stream(
             headers={"Cache-Control": "no-store"}, background=BackgroundTask(cleanup),
         )
     except (httpx.TimeoutException, TimeoutError) as exc:
-        raise APIError(504, "TTS_TIMEOUT", "Speech synthesis timed out.") from exc
+        logger.warning(
+            "Typecast TTS timeout request_id=%r stage=response_headers error=%s elapsed_ms=%.0f",
+            request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
+        )
+        raise APIError(
+            504, "TTS_TIMEOUT", "Speech synthesis timed out.",
+            diagnostics=TTSDiagnostics(reason="timeout"),
+        ) from exc
     except httpx.RequestError as exc:
-        raise APIError(502, "TTS_FAILED", "Speech synthesis failed.") from exc
+        logger.warning(
+            "Typecast TTS failed request_id=%r transport_error=%s elapsed_ms=%.0f",
+            request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
+        )
+        raise APIError(
+            502, "TTS_FAILED", "Speech synthesis failed.",
+            diagnostics=TTSDiagnostics(reason="transport_error"),
+        ) from exc
     finally:
         if not forwarded:
             await cleanup()

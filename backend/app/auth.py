@@ -227,7 +227,7 @@ async def exchange_profile(
     async with httpx.AsyncClient(timeout=15) as client:
         token_response = await client.post(PROVIDERS[provider]["token"], data=token_data)
         if not token_response.is_success:
-            raise APIError(502, "OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange the OAuth authorization code.")
+            raise APIError(502, "OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange the OAuth authorization code.", upstream_status=token_response.status_code)
         access_token = token_response.json().get("access_token")
         if not access_token:
             raise APIError(502, "OAUTH_INVALID_RESPONSE", "The OAuth provider returned an invalid response.")
@@ -235,7 +235,7 @@ async def exchange_profile(
             PROVIDERS[provider]["profile"], headers={"Authorization": f"Bearer {access_token}"}
         )
         if not profile_response.is_success:
-            raise APIError(502, "OAUTH_PROFILE_FAILED", "Failed to retrieve the OAuth user profile.")
+            raise APIError(502, "OAUTH_PROFILE_FAILED", "Failed to retrieve the OAuth user profile.", upstream_status=profile_response.status_code)
         payload = profile_response.json()
     provider_user_id = str(payload.get("id", ""))
     nickname = (

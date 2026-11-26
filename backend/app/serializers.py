@@ -72,7 +72,11 @@ def consultation_response(consultation: Consultation) -> dict:
         "deck_size": consultation.deck_size,
         "expected_card_count": consultation.expected_card_count,
         "cards": [card_response(card) for card in consultation.cards],
-        "report_status": consultation.report.status if consultation.report else None,
+        "report_status": (
+            consultation.report.status if consultation.report else
+            "PENDING" if consultation.status == "ENDED" and consultation.report_draft else None
+        ),
+        "has_report_draft": consultation.report_draft is not None,
         "created_at": ensure_utc(consultation.created_at),
         "ended_at": ensure_utc(consultation.ended_at),
         "call_ends_at": consultation.call_ends_at,
