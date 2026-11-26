@@ -1,4 +1,5 @@
 import { Cards } from "@/components/cards";
+import { CallCaptions } from "@/components/call-captions";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -291,9 +292,11 @@ function Call({ initial }: { initial: Session }) {
       )}
       {v.phase === "listening" && (
         <Panel title="MESSAGE" className="listening-message">
-          <p aria-live="polite">
-            {v.caption || "편하게 말해줘. 아래 질문을 골라도 좋아!"}
-          </p>
+          <CallCaptions
+            caption={v.caption}
+            history={v.captionHistory}
+            fallback="편하게 말해줘. 아래 질문을 골라도 좋아!"
+          />
           <div className="topic-list">
             {topicSets[topics].map((topic) => (
               <Button
@@ -406,14 +409,17 @@ function Call({ initial }: { initial: Session }) {
           {!selecting && v.phase !== "question" && (
             <>
               <Panel title="MESSAGE" className="reading-message">
-                <p aria-live="polite">
-                  {v.caption ||
-                    (v.phase === "reveal" && focused
+                <CallCaptions
+                  caption={v.caption}
+                  history={v.captionHistory}
+                  fallback={
+                    v.phase === "reveal" && focused
                       ? focused.reversed
                         ? focused.reverse
                         : focused.upright
-                      : "네 이야기를 듣고 있어.")}
-                </p>
+                      : "네 이야기를 듣고 있어."
+                  }
+                />
               </Panel>
             </>
           )}
@@ -442,9 +448,9 @@ function Call({ initial }: { initial: Session }) {
           ) : null}
         </div>
       )}
-      {v.error ? (
+      {v.error || v.speechError ? (
         <p role="alert" className="error-message">
-          {v.error}
+          {v.error || v.speechError}
         </p>
       ) : null}
       {v.phase === "listening" && (

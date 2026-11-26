@@ -14,6 +14,9 @@ const audioMock = vi.hoisted(() => ({
   state: (_busy: boolean) => {
     void _busy;
   },
+  error: (_error: Error) => {
+    void _error;
+  },
   appended: [] as Array<[string, string]>,
   playback: (_text: string) => {
     void _text;
@@ -30,10 +33,12 @@ vi.mock("./speech.ts", () => ({
       options: {
         onPlaybackStart: (text: string) => void;
         onState: (busy: boolean) => void;
+        onError: (error: Error) => void;
       },
     ) {
       audioMock.playback = options.onPlaybackStart;
       audioMock.state = options.onState;
+      audioMock.error = options.onError;
     }
     append(text: string, responseId: string) {
       audioMock.appended.push([text, responseId]);
@@ -298,6 +303,30 @@ test("batches 100 characters through the next sentence ending and flushes the ta
     type: "response.output_text.done", response_id: id, text: prefix + " 다음 문장. 끝",
   });
   expect(audioMock.appended.at(-1)).toEqual([" 끝", id]);
+  expect(controller.getSnapshot().captionHistory).toEqual([]);
+  audioMock.playback(prefix + " 다음 문장.");
+  audioMock.playback(" 끝");
+  expect(controller.getSnapshot().caption).toBe("끝");
+  const history = [prefix + " 다음 문장.", "끝"];
+  expect(controller.getSnapshot().captionHistory).toEqual(history);
+
+  await controller.event({ type: "response.created", response: { id: "next" } });
+  expect(controller.getSnapshot().caption).toBe("");
+  expect(controller.getSnapshot().captionHistory).toEqual(history);
+});
+
+test("explains speech synthesis failures until playback resumes", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
+  await controller.start();
+
+  audioMock.error(Error("Speech synthesis failed."));
+  expect(controller.getSnapshot().speechError).toBe(
+    "지금은 말할 수 없어요 (Speech synthesis failed.)",
+  );
+
+  audioMock.playback("다시 이야기를 이어갈게.");
+  expect(controller.getSnapshot().speechError).toBeUndefined();
 });
 
 test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {

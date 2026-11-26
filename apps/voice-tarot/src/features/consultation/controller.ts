@@ -44,8 +44,10 @@ export interface View {
   heading: string;
   hint: string;
   caption: string;
+  captionHistory: string[];
   status: string;
   error: string;
+  speechError?: string;
   endUnconfirmed?: boolean;
   startIssue?: "microphone";
   retryNumbers?: boolean;
@@ -191,6 +193,7 @@ export class Consultation {
       heading: "공주야,\n무슨 일 있었어?",
       hint: "",
       caption: "",
+      captionHistory: [],
       status: "연결 준비",
       error: session.reportPending ? "마무리 작업을 다시 시도해 주세요." : "",
       endUnconfirmed: session.reportPending && !session.ended,
@@ -431,7 +434,7 @@ export class Consultation {
       "잠깐만, 공주야.\n언니가 전화 받을게.",
       "연결 상태를 확인하고 있어요.",
     );
-    this.update({ error: "", startIssue: undefined });
+    this.update({ error: "", speechError: undefined, startIssue: undefined });
     let requestingMicrophone = false;
     try {
       this.audio = takeAudio();
@@ -467,15 +470,25 @@ export class Consultation {
                   : "공주 얘기 듣는 중",
             });
         },
-        onError: (error: Error) => this.failMessage(error),
+        onError: (error: Error) => {
+          if (stale()) return;
+          const detail = error.message.trim() || "음성 합성에 실패했어요.";
+          this.update({ speechError: `지금은 말할 수 없어요 (${detail})` });
+        },
         onPlaybackStart: (text: string) => {
           if (this.view.phase === "reading" && this.view.active.length === 1)
             this.readingPlaybackSlot = this.view.active[0];
           if (this.stopped) return;
+          const caption = displaySpeech(text).trim();
           this.update({
-            caption: (this.view.caption + displaySpeech(text)).slice(-600),
+            ...(caption && {
+              caption,
+              captionHistory: [...this.view.captionHistory, caption],
+            }),
+            audioPlaying: true,
+            speechError: undefined,
+            status: "레나가 말하는 중",
           });
-          this.update({ audioPlaying: true, status: "레나가 말하는 중" });
         },
       });
       if (stale()) return;
