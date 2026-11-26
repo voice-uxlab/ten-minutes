@@ -77,13 +77,30 @@ export function Panel({
     </div>
   );
 }
+export function LoadingWave() {
+  return <span className="loading-wave" aria-hidden="true"><MetallicIcon name="wave-connecting" /></span>;
+}
+
+export function LoadingPage({ message }: { message: string }) {
+  return (
+    <section className="page metallic-page loading-page">
+      <BrandHeader />
+      <div className="loading-content">
+        <Reader status={message} loading />
+      </div>
+    </section>
+  );
+}
+
 export function Reader({
   status = "나는 레나야. 편하게 얘기해봐.",
   profile = false,
+  loading = false,
   active = false,
 }: {
   status?: string;
   profile?: boolean;
+  loading?: boolean;
   active?: boolean;
 }) {
   return (
@@ -104,7 +121,7 @@ export function Reader({
       </div>
       <div className="mention glass">
         <small>{profile ? "PROFILE" : "MENTION"}</small>
-        <p role="status">{status}</p>
+        <p role="status">{loading && <LoadingWave />}{status}</p>
       </div>
     </div>
   );

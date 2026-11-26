@@ -645,6 +645,13 @@ export class Consultation {
       if (this.responding) this.send({ type: "response.cancel" });
       this.update({ status: "공주 얘기 듣는 중" });
     }
+    if (
+      e.type === "input_audio_buffer.speech_stopped" &&
+      this.view.phase === "picking" &&
+      !this.stopped
+    ) {
+      this.update({ status: "말해준 번호를 확인하는 중" });
+    }
     if (e.type === "response.done" && r) {
       if (this.completed.has(r.id)) return;
       this.completed.add(r.id);

@@ -11,7 +11,7 @@ import {
 } from "@/features/consultation/domain";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BrandHeader, MetallicIcon, Reader, Panel } from "@/components/tarot";
+import { BrandHeader, LoadingPage, MetallicIcon, Reader, Panel } from "@/components/tarot";
 const topicSets = [
   [
     "그 사람도 나를 좋아할까?",
@@ -30,9 +30,7 @@ export function SessionPage() {
   const reading = useQuery(consultationOptions(id));
   if (reading.isPending)
     return (
-      <section className="page" role="status">
-        이전 상담을 확인하고 있어요.
-      </section>
+      <LoadingPage message="이전 상담을 확인하고 있어요." />
     );
   if (reading.error)
     return (
@@ -261,7 +259,8 @@ function Call({ initial }: { initial: Session }) {
               "confirm",
               "reading",
             ].includes(v.phase)}
-            status={retry ? "번호를 다시 말해줘" : v.status}
+            loading={v.status === "레나가 생각하는 중" || v.status === "말해준 번호를 확인하는 중"}
+            status={v.status}
           />
         )
       )}
