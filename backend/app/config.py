@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     typecast_voice_id: Optional[str] = None
     typecast_model: str = "ssfm-v30"
     voice_cleanup_secret: Optional[SecretStr] = None
-    voice_connections_per_consultation: int = Field(default=4, ge=1)
-    voice_connections_per_account_day: int = Field(default=20, ge=1)
+    voice_connections_per_consultation: int = Field(default=8, ge=1)
+    voice_connections_per_account_day: int = Field(default=40, ge=1)
     tts_characters_per_consultation: int = Field(default=12000, ge=1)
     tts_characters_per_account_day: int = Field(default=60000, ge=1)
     tts_parallel_requests: int = Field(default=4, ge=1)
