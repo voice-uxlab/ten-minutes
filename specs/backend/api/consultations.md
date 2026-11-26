@@ -110,6 +110,23 @@
 **Response:** `200 ConsultationResponse`  
 이미 종료된 상담의 종료 요청을 다시 받으면, 남아 있는 OpenAI 연결만 종료한다. 연결 종료와 리포트 완료는 별도 상태다.
 
+리포트 메모를 저장한 클라이언트는 선택 필드 `defer_voice_cleanup: true`를 보낼 수 있다.
+이 경우 상담 종료와 만료 시각을 커밋하고 응답한다. 클라이언트는 이후 일반 종료
+요청과 리포트 생성 요청을 독립적으로 보낸다. 통화 종료 실패나 요청 유실은 기존
+예약 작업이 보완한다. 상담 조회의 `has_report_draft`는 메모 저장 여부를 나타낸다.
+
+### 1.5 리포트용 중간 저장과 생성
+
+- `PUT /api/v1/consultations/{consultation_id}/report-draft`는 소유자의 활성 상담에
+  `summary`(최대 300자) 또는 `readings`(`slot`과 최대 300자의 `text`)를 부분 갱신하고
+  `204`를 반환한다. 서버에서 공개한 슬롯만 허용한다.
+- `POST /api/v1/consultations/{consultation_id}/report/generate`는 소유자의 종료된
+  상담에서 실행 가능한 작업을 한 번 처리하고 `204`를 반환한다.
+- `GET /api/v1/consultations/{consultation_id}/report`는 종료 후 리포트 작업이 남아
+  있으면 `202`를, 완료 후에는 기존 리포트 응답을 반환한다.
+- 종료 요청이 유실되면 예약 작업이 10분 기한이 지난 상담에서 마지막 저장 메모를 사용한다.
+  중간 메모는 리포트 작성 후 삭제하며, 기한 이후 24시간이 지난 미완료 메모도 정리한다.
+
 ## 2. 음성 API
 
 ### 2.1 Realtime WebRTC 연결

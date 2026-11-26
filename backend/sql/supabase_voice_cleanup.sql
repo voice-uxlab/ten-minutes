@@ -35,3 +35,32 @@ select cron.schedule(
       );
     $job$
 );
+
+-- Report jobs run separately so a voice provider error cannot block generation.
+select cron.schedule(
+    'ten-minutes-report-generation',
+    '* * * * *',
+    $job$
+    select net.http_post(
+        url := rtrim(endpoint.decrypted_secret, '/') || '/api/v1/internal/report-generation',
+        headers := jsonb_build_object('Authorization', 'Bearer ' || auth.decrypted_secret)
+            || coalesce((
+                select jsonb_build_object('x-vercel-protection-bypass', decrypted_secret)
+                from vault.decrypted_secrets
+                where name = 'voice_cleanup_vercel_bypass'
+            ), '{}'::jsonb),
+        timeout_milliseconds := 30000
+    )
+    from vault.decrypted_secrets as endpoint
+    cross join vault.decrypted_secrets as auth
+    where endpoint.name = 'voice_cleanup_backend_origin'
+      and endpoint.decrypted_secret like 'https://%'
+      and auth.name = 'voice_cleanup_secret'
+      and auth.decrypted_secret <> ''
+      and exists (
+          select 1
+          from public.consultation_report_drafts
+          where run_at <= now()
+      );
+    $job$
+);

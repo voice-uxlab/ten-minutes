@@ -140,6 +140,9 @@ class Consultation(Base):
     report: Mapped[Optional["ConsultationReport"]] = relationship(
         back_populates="consultation", cascade="all, delete-orphan", uselist=False
     )
+    report_draft: Mapped[Optional["ConsultationReportDraft"]] = relationship(
+        cascade="all, delete-orphan", uselist=False
+    )
 
 
 class RealtimeCall(Base):
@@ -200,6 +203,21 @@ class ConsultationReport(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     consultation: Mapped[Consultation] = relationship(back_populates="report")
+
+
+class ConsultationReportDraft(Base):
+    __tablename__ = "consultation_report_drafts"
+
+    consultation_id: Mapped[str] = mapped_column(
+        ForeignKey("consultation_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    summary: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    readings: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    lease: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 
 class ShareLink(Base):
