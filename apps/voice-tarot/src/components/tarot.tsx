@@ -81,13 +81,12 @@ export function LoadingWave() {
   return <span className="loading-wave" aria-hidden="true"><MetallicIcon name="wave-connecting" /></span>;
 }
 
-export function LoadingPage({ message, children }: { message: string; children?: ReactNode }) {
+export function LoadingPage({ message }: { message: string }) {
   return (
     <section className="page metallic-page loading-page">
       <BrandHeader />
       <div className="loading-content">
         <Reader status={message} loading />
-        {children}
       </div>
     </section>
   );

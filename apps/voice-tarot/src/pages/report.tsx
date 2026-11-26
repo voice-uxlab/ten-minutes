@@ -35,11 +35,7 @@ export function ReportPage() {
   }
   if (report.isPending) return <LoadingPage message="리포트를 불러오고 있어요." />;
   if (pending && !report.error)
-    return (
-      <LoadingPage message="저장된 상담 메모로 리포트를 만들고 있어요.">
-        <Link to="/reports">내 리포트 목록</Link>
-      </LoadingPage>
-    );
+    return <LoadingPage message="저장된 상담 메모로 리포트를 만들고 있어요." />;
   if (report.error instanceof FastApiError && report.error.status === 401)
     return <Navigate to="/login" replace />;
   if (
