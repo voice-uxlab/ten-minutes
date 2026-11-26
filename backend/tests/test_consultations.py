@@ -910,3 +910,69 @@ def test_voice_heartbeat_and_cleanup_leave_live_calls_open(authenticated_client,
     assert call.closed_at is not None
     assert client.request("POST", cleanup, headers=auth).status_code == 204
     assert provider.call_count == 3
+
+
+def test_tts_502_logs_provider_failure(authenticated_client, db_session, monkeypatch, caplog):
+    from datetime import datetime, timedelta, timezone
+
+    import httpx
+
+    from app.config import get_settings
+    from app.models import RealtimeCall
+
+    client, _ = authenticated_client
+    consultation_id = create_consultation(client)["id"]
+    db_session.add(RealtimeCall(
+        id="rtc_test", consultation_id=consultation_id,
+        hangup_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    ))
+    db_session.commit()
+    monkeypatch.setattr(get_settings(), "typecast_api_key", "secret-test-key")
+    monkeypatch.setattr(get_settings(), "typecast_voice_id", "test-voice")
+
+    async def rejected(self, request, **kwargs):
+        return httpx.Response(402, text="sensitive provider detail")
+
+    async def disconnected(self, request, **kwargs):
+        raise httpx.ConnectError("sensitive provider detail")
+
+    async def timed_out(self, request, **kwargs):
+        raise httpx.ReadTimeout("sensitive provider detail")
+
+    for send, expected, status, reason in [
+        (rejected, "upstream_status=402", 502, "provider_http_error"),
+        (disconnected, "transport_error=ConnectError", 502, "transport_error"),
+        (timed_out, "error=ReadTimeout", 504, "timeout"),
+    ]:
+        caplog.clear()
+        monkeypatch.setattr(httpx.AsyncClient, "send", send)
+        response = client.post(
+            f"/api/v1/consultations/{consultation_id}/tts/stream",
+            json={"text": "private speech", "response_id": "resp_test", "segment_index": 0},
+        )
+        assert response.status_code == status
+        error = response.json()["error"]
+        assert error["code"] == ("TTS_TIMEOUT" if status == 504 else "TTS_FAILED")
+        diagnostic = {"provider": "typecast", "stage": "response_headers", "reason": reason}
+        if send is rejected:
+            diagnostic["upstream_status"] = 402
+        assert error["diagnostics"] == diagnostic
+        assert expected in caplog.text and error["request_id"] in caplog.text
+        assert "elapsed_ms=" in caplog.text
+        for private in ("private speech", "secret-test-key", "sensitive provider detail"):
+            assert private not in caplog.text and private not in response.text
+
+
+def test_validation_and_unmatched_route_logs_hide_user_input(authenticated_client, caplog):
+    client, _ = authenticated_client
+    path = "/api/v1/consultations"
+    response = client.post(path, json={"consent_version": {"private-input": "sensitive-value"}})
+    assert response.status_code == 422
+    assert response.headers["x-request-id"] in caplog.text
+    assert "body.consent_version=" in caplog.text
+    caplog.clear()
+    response = client.get("/private-share-token?code=private-code")
+    assert response.status_code == 404
+    messages = [record.getMessage() for record in caplog.records if record.name == "app.errors"]
+    assert any("route=<unmatched>" in message for message in messages)
+    assert all("private-" not in message for message in messages)

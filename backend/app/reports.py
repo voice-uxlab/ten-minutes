@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -7,6 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .config import Settings
+from .errors import current_request_id
 from .models import (
     Consultation,
     ConsultationReport,
@@ -16,6 +18,8 @@ from .models import (
     uuid_string,
 )
 from .schemas import SaveReportRequest
+
+logger = logging.getLogger(__name__)
 
 
 def mark_consultation_ended(
@@ -131,8 +135,12 @@ def process_due_report(db: Session, settings: Settings, consultation_id: Optiona
                 queen_line=text["queen_line"].strip(),
                 readings=readings,
             )
-        except (httpx.HTTPError, ValueError, TypeError, AttributeError, KeyError):
-            pass
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError, KeyError) as exc:
+            logger.warning(
+                "Report generation failed request_id=%r attempt=%d error=%s upstream_status=%s",
+                current_request_id.get(), attempts, type(exc).__name__,
+                exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
+            )
 
     consultation = db.scalar(
         select(Consultation).where(Consultation.id == job_id)

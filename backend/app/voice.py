@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .errors import APIError
+from .errors import APIError, current_request_id
 from .models import (
     Consultation,
     RealtimeCall,
@@ -111,7 +112,11 @@ def reserve_connection(
 
 def hangup(client: httpx.Client, call_id: str, api_key: str) -> bool:
     response = client.post(f"{OPENAI_CALLS}/{call_id}/hangup", headers={"Authorization": f"Bearer {api_key}"})
-    return response.is_success or response.status_code in {404, 410}
+    closed = response.is_success or response.status_code in {404, 410}
+    if not closed:
+        logging.getLogger(__name__).warning("Realtime hangup failed request_id=%r upstream_status=%d",
+                                            current_request_id.get(), response.status_code)
+    return closed
 
 
 def close_record(db: Session, call_id: str) -> None:
@@ -163,7 +168,7 @@ def create_voice_connection(
                 },
             )
             if not response.is_success:
-                raise APIError(502, "REALTIME_CONNECTION_FAILED", "Failed to establish the voice connection.")
+                raise APIError(502, "REALTIME_CONNECTION_FAILED", "Failed to establish the voice connection.", upstream_status=response.status_code)
             location = urlsplit(response.headers.get("location", "")).path
             match = re.fullmatch(r"/v1/realtime/calls/(rtc_[a-zA-Z0-9_-]{1,124})", location)
             if not match:
@@ -252,7 +257,9 @@ def close_inactive_voice_calls(db: Session, api_key: str) -> None:
         for call_id in call_ids:
             try:
                 closed = hangup(client, call_id, api_key)
-            except httpx.RequestError:
+            except httpx.RequestError as exc:
+                logging.getLogger(__name__).warning("Realtime cleanup failed request_id=%r error=%s",
+                                                    current_request_id.get(), type(exc).__name__)
                 closed = False
             if closed:
                 close_record(db, call_id)
