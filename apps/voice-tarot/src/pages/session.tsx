@@ -125,7 +125,7 @@ function Call({ initial }: { initial: Session }) {
             checked={consent}
             onChange={(e) => setConsent(e.target.checked)}
           />
-          음성은 OpenAI로, 답변 텍스트는 타입캐스트로 전송하는 데 동의해요.
+          음성은 OpenAI로, 답변 텍스트는 타입캐스트로 전송하고 리포트용 상담 메모를 임시 저장하는 데 동의해요.
         </label>
         <Button
           size="wide"
@@ -157,7 +157,7 @@ function Call({ initial }: { initial: Session }) {
           <p>
             {v.phase === "ending"
               ? "오늘의 이야기를 정리하고 있어."
-              : s.report?.queen_line}
+              : s.report?.queen_line || "리포트 페이지에서 진행 상태를 확인할 수 있어요."}
           </p>
         </Panel>
         {v.phase === "ending" && v.error && (
@@ -168,7 +168,7 @@ function Call({ initial }: { initial: Session }) {
               disabled={v.busy}
               onClick={() => void controller.saveReport()}
             >
-              리포트 저장 다시 시도
+              {v.endUnconfirmed ? "상담 종료 다시 확인" : "리포트 저장 다시 시도"}
             </Button>
           </>
         )}

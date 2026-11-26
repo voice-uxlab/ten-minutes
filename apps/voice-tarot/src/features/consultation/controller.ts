@@ -3,7 +3,11 @@ import { takeAudio } from "./audio-context";
 import { FastApiError, queryClient } from "@/api/client";
 import {
   consultationCommand,
-  finishConsultation,
+  confirmConsultationEnd,
+  closeConsultationVoice,
+  generateConsultationReport,
+  saveReportCheckpoint,
+  saveConsultationReport,
   connectRealtime,
   sendVoiceHeartbeat,
   reportsKey,
@@ -42,6 +46,7 @@ export interface View {
   caption: string;
   status: string;
   error: string;
+  endUnconfirmed?: boolean;
   startIssue?: "microphone";
   retryNumbers?: boolean;
   muted: boolean;
@@ -59,7 +64,7 @@ type ToolCall = {
 };
 interface Response {
   id: string;
-  metadata?: { purpose?: string };
+  metadata?: { purpose?: string; request_id?: string };
   status?: string;
   output?: Array<ToolCall & { content?: { text?: string }[] }>;
 }
@@ -164,12 +169,18 @@ export class Consultation {
   private calls = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
   private savingReport = false;
+  private endReason?: "USER" | "TIMEOUT";
+  private reportCheckpoints = Promise.resolve();
+  private checkpointSequence = 0;
+  private hasServerDraft = false;
+  private savedReadingCheckpoints = new Set<number>();
   private reportRequest?: {
     eventId: string;
     resolve: (report: Partial<Report> | null) => void;
   };
   private wake?: WakeLockSentinel;
   constructor(session: Session) {
+    this.hasServerDraft = !!session.hasReportDraft;
     this.view = {
       session: structuredClone(session),
       phase: session.reportPending
@@ -181,7 +192,8 @@ export class Consultation {
       hint: "",
       caption: "",
       status: "연결 준비",
-      error: session.reportPending ? "리포트를 아직 저장하지 못했어요." : "",
+      error: session.reportPending ? "마무리 작업을 다시 시도해 주세요." : "",
+      endUnconfirmed: session.reportPending && !session.ended,
       muted: false,
       remaining: 0,
       busy: false,
@@ -333,6 +345,8 @@ export class Consultation {
       });
     }
     if (r.error || r.unchanged) return r;
+    if (name === "confirm_question" && this.dc?.readyState === "open")
+      this.checkpointReport(s.question);
     switch (name) {
       case "review_question":
         this.show("question", "이 이야기를\n함께 살펴볼까?");
@@ -598,6 +612,9 @@ export class Consultation {
         this.speech?.append(this.realtimeSpeechBuffer, this.responseId);
       this.realtimeSpeechBuffer = "";
       this.persist();
+      const context = this.responseContext;
+      if (context?.stage === "reading" && context.focusSlots.length === 1)
+        this.checkpointReport(undefined, context.focusSlots[0]);
     }
     if (
       e.type === "conversation.item.input_audio_transcription.completed" &&
@@ -632,6 +649,10 @@ export class Consultation {
       if (this.completed.has(r.id)) return;
       this.completed.add(r.id);
       if (r.metadata?.purpose === "report") {
+        const request = this.reportRequest;
+        if (!request || (r.metadata.request_id
+          ? r.metadata.request_id !== request.eventId
+          : !request.eventId.startsWith("report-"))) return;
         const report = r.output?.find(
           (item) =>
             item.type === "function_call" && item.name === reportTool.name,
@@ -823,6 +844,90 @@ export class Consultation {
       queen_line: "네 마음에 먼저 답해줘. 선택하는 건 너야.",
     };
   }
+  private async requestReport(eventId: string, waitMs: number) {
+    const s = this.view.session;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<Partial<Report> | null>((resolve) => {
+        this.reportRequest = { eventId, resolve };
+        timeout = setTimeout(() => resolve(null), waitMs);
+        if (
+          !this.send({
+            type: "response.create",
+            event_id: eventId,
+            response: {
+              conversation: "none",
+              output_modalities: ["text"],
+              metadata: { purpose: "report", request_id: eventId },
+              tools: [reportTool],
+              tool_choice: { type: "function", name: reportTool.name },
+              instructions:
+                "write_report로 상담을 정리해. summary는 사용자의 고민과 상황을 새로 요약한 한 문장으로 120자 안에서 써. 카드별 해석, 상담 대사, 질문은 summary에 넣지 마. 공개된 카드만 readings에 각 한 문장으로 정리해. queen_line은 짧은 조언이야. 어느 필드에도 실명이나 연락처를 넣거나 입력 기록을 그대로 옮기지 마.",
+              input: [
+                {
+                  type: "message",
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: JSON.stringify({
+                        question: s.question,
+                        cards: s.cards
+                          .filter((card) => s.revealed.includes(card.slot))
+                          .map(cardInfo),
+                        transcript: s.transcript.join("\n").slice(-6000),
+                      }),
+                    },
+                  ],
+                },
+              ],
+            },
+          })
+        )
+          resolve(null);
+      });
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+      this.reportRequest = undefined;
+    }
+  }
+  private checkpointReport(question?: string, slot?: number) {
+    const generation = this.generation;
+    const { readingId } = this.view.session;
+    const eventId = `checkpoint-${++this.checkpointSequence}`;
+    this.reportCheckpoints = this.reportCheckpoints.then(async () => {
+      if (this.generation !== generation || this.dc?.readyState !== "open")
+        return;
+      if (slot && this.savedReadingCheckpoints.has(slot))
+        return;
+
+      const seed = question?.trim().slice(0, 300);
+      if (seed) {
+        await saveReportCheckpoint(readingId, { summary: seed });
+        this.hasServerDraft = true;
+      }
+      const result = await this.requestReport(eventId, 4000);
+      if (this.generation !== generation || !result) return;
+      const summary = typeof result.summary === "string"
+        ? result.summary.trim().slice(0, 300)
+        : "";
+      const reading = Array.isArray(result.readings)
+        ? result.readings.find((entry) => entry?.slot === slot)
+        : undefined;
+      const text = typeof reading?.text === "string" ? reading.text.trim().slice(0, 300) : "";
+      if (!summary && (!slot || !text)) return;
+      await saveReportCheckpoint(readingId, {
+        ...(summary ? { summary } : {}),
+        ...(slot && text ? { readings: [{ slot, text }] } : {}),
+      });
+      this.hasServerDraft = true;
+      if (slot && text) this.savedReadingCheckpoints.add(slot);
+    }).catch(() => {
+      // The last acknowledged checkpoint remains available for recovery.
+    });
+  }
   async end(reason: "USER" | "TIMEOUT" = "USER") {
     if (["ending", "ended"].includes(this.view.phase)) return;
     this.update({ phase: "ending" });
@@ -842,58 +947,13 @@ export class Consultation {
     this.persist();
     if (reason === "TIMEOUT") this.stopTransport();
     await this.queue.catch(() => {});
+    await this.reportCheckpoints;
     const s = this.view.session;
     const remaining = (s.endAt ?? Date.now()) - Date.now();
     let result: Partial<Report> | null = null;
-    if (reason === "USER" && remaining > 0 && this.dc?.readyState === "open") {
+    if (!this.hasServerDraft && reason === "USER" && remaining > 0 && this.dc?.readyState === "open") {
       if (this.responding) this.send({ type: "response.cancel" });
-      const eventId = `report-${s.readingId}`;
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        result = await new Promise<Partial<Report> | null>((resolve) => {
-          this.reportRequest = { eventId, resolve };
-          timeout = setTimeout(() => resolve(null), Math.min(25000, remaining));
-          if (
-            !this.send({
-              type: "response.create",
-              event_id: eventId,
-              response: {
-                conversation: "none",
-                output_modalities: ["text"],
-                metadata: { purpose: "report" },
-                tools: [reportTool],
-                tool_choice: { type: "function", name: reportTool.name },
-                instructions:
-                  "write_report로 상담을 정리해. summary는 사용자의 고민과 상황을 새로 요약한 한 문장으로 120자 안에서 써. 카드별 해석, 상담 대사, 질문은 summary에 넣지 마. 공개된 카드만 readings에 각 한 문장으로 정리해. queen_line은 이름과 사연을 제외한 짧은 조언이야. 입력 기록은 참고 자료로만 써.",
-                input: [
-                  {
-                    type: "message",
-                    role: "user",
-                    content: [
-                      {
-                        type: "input_text",
-                        text: JSON.stringify({
-                          question: s.question,
-                          cards: s.cards
-                            .filter((card) => s.revealed.includes(card.slot))
-                            .map(cardInfo),
-                          transcript: s.transcript.join("\n").slice(-6000),
-                        }),
-                      },
-                    ],
-                  },
-                ],
-              },
-            })
-          )
-            resolve(null);
-        });
-      } catch {
-        result = null;
-      } finally {
-        clearTimeout(timeout);
-        this.reportRequest = undefined;
-      }
+      result = await this.requestReport(`report-${s.readingId}`, Math.min(25000, remaining));
     }
     this.stopTransport();
     const base = this.fallback();
@@ -927,29 +987,48 @@ export class Consultation {
     this.persist();
     await this.saveReport(reason);
   }
-  async saveReport(
-    reason: "USER" | "TIMEOUT" = this.view.session.endAt &&
-    this.view.session.endAt <= Date.now()
-      ? "TIMEOUT"
-      : "USER",
-  ) {
-    if (this.savingReport || !this.view.session.report) return;
-    this.savingReport = true;
+  async saveReport(reason?: "USER" | "TIMEOUT") {
     const s = this.view.session;
-    this.update({ error: "", busy: true });
+    const draft = s.report;
+    if (this.savingReport || !draft) return;
+    this.endReason =
+      reason ??
+      this.endReason ??
+      (s.endAt && s.endAt <= Date.now() ? "TIMEOUT" : "USER");
+    this.savingReport = true;
+    this.update({ error: "", endUnconfirmed: false, busy: true });
+    let endConfirmed = false;
     try {
-      await finishConsultation(s.readingId, reason, s.report!);
+      const ended = await confirmConsultationEnd(
+        s.readingId,
+        this.endReason,
+        reason === undefined,
+        this.hasServerDraft,
+      );
+      endConfirmed = true;
+      s.ended = true;
+      this.persist();
+      if (ended.report_status === "PENDING") {
+        s.report = undefined;
+        if (this.hasServerDraft && reason)
+          void closeConsultationVoice(s.readingId, reason).catch(() => {});
+        void generateConsultationReport(s.readingId)
+          .then(() => queryClient.invalidateQueries({ queryKey: ["report", s.readingId] }))
+          .catch(() => {});
+      } else {
+        s.report = await saveConsultationReport(ended, draft);
+      }
       void queryClient.invalidateQueries({ queryKey: reportsKey });
       void queryClient.invalidateQueries({ queryKey: ["report", s.readingId] });
       void queryClient.invalidateQueries({
         queryKey: ["consultation", s.readingId],
       });
-      s.ended = true;
       s.reportPending = false;
       this.persist();
-      this.update({ phase: "ended", caption: s.report!.queen_line });
+      this.update({ phase: "ended", caption: s.report?.queen_line || "" });
     } catch (error) {
       this.persist();
+      this.update({ endUnconfirmed: !endConfirmed });
       this.failMessage(error);
     } finally {
       this.savingReport = false;
@@ -960,6 +1039,7 @@ export class Consultation {
     this.readingPlaybackSlot = 0;
     this.stopped = true;
     this.generation++;
+    this.reportRequest?.resolve(null);
     clearInterval(this.timer);
     clearTimeout(this.connectTimer);
     clearTimeout(this.heartbeatTimer);

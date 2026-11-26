@@ -9,8 +9,13 @@ import { BrandHeader, MetallicIcon, Panel } from "@/components/tarot";
 import { Button } from "@/components/ui/button";
 export function ReportPage() {
   const { id = "" } = useParams(),
-    report = useQuery(reportOptions(id)),
-    s = report.data,
+    report = useQuery({
+      ...reportOptions(id),
+      refetchInterval: ({ state }) =>
+        state.data && "pending" in state.data ? 3000 : false,
+    }),
+    pending = report.data && "pending" in report.data,
+    s = report.data && !("pending" in report.data) ? report.data : null,
     [error, setError] = useState(""),
     [shareStatus, setShareStatus] = useState("");
   async function shareInvite() {
@@ -29,6 +34,13 @@ export function ReportPage() {
     }
   }
   if (report.isPending) return <p role="status">리포트를 불러오고 있어요.</p>;
+  if (pending && !report.error)
+    return (
+      <section className="page">
+        <p role="status">저장된 상담 메모로 리포트를 만들고 있어요.</p>
+        <Link to="/reports">내 리포트 목록</Link>
+      </section>
+    );
   if (report.error instanceof FastApiError && report.error.status === 401)
     return <Navigate to="/login" replace />;
   if (
@@ -69,6 +81,14 @@ export function ReportPage() {
         <h2>{s.question || s.report.question}</h2>
         <p>{s.report.summary}</p>
       </Panel>
+      {s.report.readings?.map(({ slot, text }) => (
+        <Panel
+          key={slot}
+          title={s.cards.find((card) => card.slot === slot)?.name || `${slot}번 카드`}
+        >
+          <p>{text}</p>
+        </Panel>
+      ))}
       <Panel title="언니의 한마디">
         <p>{s.report.queen_line}</p>
       </Panel>

@@ -22,7 +22,7 @@ import { BrandHeader, MetallicIcon, Reader, Panel } from "@/components/tarot";
 const loginAttemptKey = "voice-tarot:login-attempt";
 const recentLoginKey = "voice-tarot:recent-login";
 const aiProcessing =
-  "음성 타로 상담을 위해 내 음성을 OpenAI에, AI 답변 텍스트를 Typecast에 전송하여 처리하는 데 동의합니다.";
+  "음성 타로 상담을 위해 내 음성을 OpenAI에, AI 답변 텍스트를 Typecast에 전송하여 처리하고, 리포트 작성을 위해 상담 요약과 카드별 해석 메모를 임시 저장하는 데 동의합니다.";
 
 function loginProvider(provider: string | null): "kakao" | null {
   return provider === "kakao" ? provider : null;

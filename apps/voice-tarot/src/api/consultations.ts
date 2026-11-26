@@ -8,7 +8,7 @@ import {
   type Report,
   type Session,
 } from "./types";
-import { fastApi, fastApiJson } from "./client";
+import { FastApiError, fastApi, fastApiJson } from "./client";
 import { consentVersion } from "./auth";
 import { isLegacyReading, loadSession } from "@/lib/storage";
 
@@ -32,6 +32,7 @@ interface ConsultationResponse {
   call_ends_at: string;
   cards: ApiCard[];
   report_status: string | null;
+  has_report_draft?: boolean;
 }
 interface ApiReport {
   consultation_id: string;
@@ -100,6 +101,7 @@ function sessionFromApi(data: ConsultationResponse, local?: Session): Session {
     endAt: Date.parse(data.call_ends_at),
     ended: data.status === "ENDED" || data.status === "FAILED",
     reportPending: !!local?.reportPending && !data.report_status,
+    hasReportDraft: data.has_report_draft,
     demo: false,
     transcript: local?.transcript ?? [],
     notes: local?.notes ?? [],
@@ -126,7 +128,16 @@ export const consultationOptions = (id: string) => ({
       );
     }
     const data = await fastApi<ConsultationResponse>(path(id), { signal });
-    return sessionFromApi(data, local);
+    const session = sessionFromApi(data, local);
+    if (local?.reportPending && data.report_status === "COMPLETED") {
+      try {
+        session.report = await fetchSavedReport(id, signal);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        session.reportPending = true;
+      }
+    }
+    return session;
   },
   staleTime: 0,
 });
@@ -235,27 +246,107 @@ export function streamSpeech(
   );
 }
 
-export async function finishConsultation(
+export async function confirmConsultationEnd(
   id: string,
   reason: "USER" | "TIMEOUT",
-  report: Report,
+  retry: boolean,
+  deferVoiceCleanup = false,
+): Promise<ConsultationResponse> {
+  const url = path(id);
+  if (retry) {
+    const current = await fastApi<ConsultationResponse>(url);
+    if (current.status === "ENDED") return current;
+  }
+
+  try {
+    return await fastApiJson<ConsultationResponse>(`${url}/end`, "POST", {
+      reason,
+      ...(deferVoiceCleanup ? { defer_voice_cleanup: true } : {}),
+    });
+  } catch (error) {
+    if (error instanceof FastApiError && error.status < 500) throw error;
+    // The API commits ENDED before trying to hang up the provider call.
+    const current = await fastApi<ConsultationResponse>(url).catch(() => null);
+    if (current?.status === "ENDED") return current;
+    throw error;
+  }
+}
+
+export function saveReportCheckpoint(
+  id: string,
+  checkpoint: { summary?: string; readings?: Report["readings"] },
 ) {
-  await fastApiJson(`${path(id)}/end`, "POST", { reason });
-  await fastApiJson(`${path(id)}/report`, "PUT", {
-    situation_summary: report.summary.trim().slice(0, 500),
-    queen_line: report.queen_line.trim().slice(0, 300),
-    readings: report.readings.map(({ slot, text }) => ({
-      slot,
-      text: text.trim().slice(0, 1000),
-    })),
-  });
+  return fastApiJson<Response>(
+    `${path(id)}/report-draft`, "PUT", checkpoint, undefined,
+    AbortSignal.timeout(5000), "response",
+  );
+}
+
+export function generateConsultationReport(id: string) {
+  return fastApiJson<Response>(
+    `${path(id)}/report/generate`, "POST", undefined, undefined,
+    undefined, "response",
+  );
+}
+
+export function closeConsultationVoice(id: string, reason: "USER" | "TIMEOUT") {
+  return fastApiJson(`${path(id)}/end`, "POST", { reason });
+}
+
+function mapReport(data: ApiReport): Report {
+  return {
+    question: data.question ?? "오늘의 마음 이야기",
+    summary: data.situation_summary,
+    readings: data.readings,
+    queen_line: data.queen_line,
+  };
+}
+
+async function fetchSavedReport(id: string, signal?: AbortSignal): Promise<Report> {
+  return mapReport(await fastApi<ApiReport>(`${path(id)}/report`, { signal }));
+}
+
+export async function saveConsultationReport(
+  consultation: ConsultationResponse,
+  report: Report,
+): Promise<Report> {
+  const url = `${path(consultation.id)}/report`;
+  if (consultation.report_status === "COMPLETED")
+    return fetchSavedReport(consultation.id);
+
+  const readings = consultation.cards
+    .filter((card) => card.revealed)
+    .map((card) => {
+      const draft = report.readings.find(
+        (reading) => reading.slot === card.slot,
+      );
+      const { direction, keywords } = cardInfo(mapCard(card));
+      return {
+        slot: card.slot,
+        text: (draft?.text.trim() || `${direction} · ${keywords}`).slice(0, 1000),
+      };
+    });
+  try {
+    const saved = await fastApiJson<ApiReport>(url, "PUT", {
+      situation_summary: report.summary.trim().slice(0, 500),
+      queen_line: report.queen_line.trim().slice(0, 300),
+      readings,
+    });
+    return mapReport(saved);
+  } catch (error) {
+    if (error instanceof FastApiError && error.code === "REPORT_LOCKED")
+      return fetchSavedReport(consultation.id);
+    throw error;
+  }
 }
 
 export const reportOptions = (id: string) => ({
   queryKey: ["report", id],
   queryFn: async ({ signal }: { signal: AbortSignal }) => {
     if (isLegacyReading(id)) return loadSession(id) ?? null;
-    const data = await fastApi<ApiReport>(`${path(id)}/report`, { signal });
+    const response = await fastApi<Response>(`${path(id)}/report`, { signal }, "response");
+    if (response.status === 202) return { pending: true as const };
+    const data: ApiReport = await response.json();
     return {
       ...emptyReading,
       readingId: id,
@@ -265,12 +356,7 @@ export const reportOptions = (id: string) => ({
       transcript: [],
       notes: [],
       demo: false,
-      report: {
-        question: data.question ?? "오늘의 마음 이야기",
-        summary: data.situation_summary,
-        readings: data.readings,
-        queen_line: data.queen_line,
-      },
+      report: mapReport(data),
     } satisfies Session;
   },
 });
