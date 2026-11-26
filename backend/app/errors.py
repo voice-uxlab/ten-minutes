@@ -13,6 +13,9 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 
+from .schemas import TTSDiagnostics
+
+
 logger = logging.getLogger(__name__)
 current_request_id = ContextVar("request_id", default=None)
 
@@ -23,6 +26,7 @@ class APIError(Exception):
     code: str
     message: str
     upstream_status: Optional[int] = None
+    diagnostics: Optional[TTSDiagnostics] = None
 
 
 def error_body(code: str, message: str, request_id: str) -> dict:
@@ -52,9 +56,10 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     if exc.__cause__:
         details.append(f"cause={type(exc.__cause__).__name__}")
     request_id = log_failure(request, exc.status_code, exc.code, " ".join(details))
-    return JSONResponse(
-        content=error_body(exc.code, exc.message, request_id), status_code=exc.status_code
-    )
+    body = error_body(exc.code, exc.message, request_id)
+    if exc.diagnostics:
+        body["error"]["diagnostics"] = exc.diagnostics.model_dump(exclude_none=True)
+    return JSONResponse(content=body, status_code=exc.status_code)
 
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:

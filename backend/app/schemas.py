@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -12,10 +12,18 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TTSDiagnostics(StrictModel):
+    provider: Literal["typecast"] = "typecast"
+    stage: Literal["response_headers"] = "response_headers"
+    reason: Literal["provider_http_error", "transport_error", "timeout"]
+    upstream_status: Optional[int] = None
+
+
 class ErrorDetail(StrictModel):
     code: str = Field(description="Stable error code used by the frontend for error handling")
     message: str = Field(description="Human-readable error message")
     request_id: str = Field(description="Request identifier used to correlate Vercel and application logs")
+    diagnostics: Optional[TTSDiagnostics] = None
 
 
 class ErrorResponse(StrictModel):

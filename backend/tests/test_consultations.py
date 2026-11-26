@@ -936,20 +936,31 @@ def test_tts_502_logs_provider_failure(authenticated_client, db_session, monkeyp
     async def disconnected(self, request, **kwargs):
         raise httpx.ConnectError("sensitive provider detail")
 
-    for send, expected in [(rejected, "upstream_status=402"), (disconnected, "transport_error=ConnectError")]:
+    async def timed_out(self, request, **kwargs):
+        raise httpx.ReadTimeout("sensitive provider detail")
+
+    for send, expected, status, reason in [
+        (rejected, "upstream_status=402", 502, "provider_http_error"),
+        (disconnected, "transport_error=ConnectError", 502, "transport_error"),
+        (timed_out, "error=ReadTimeout", 504, "timeout"),
+    ]:
         caplog.clear()
         monkeypatch.setattr(httpx.AsyncClient, "send", send)
         response = client.post(
             f"/api/v1/consultations/{consultation_id}/tts/stream",
             json={"text": "private speech", "response_id": "resp_test", "segment_index": 0},
         )
-        assert response.status_code == 502
+        assert response.status_code == status
         error = response.json()["error"]
-        assert error["code"] == "TTS_FAILED"
+        assert error["code"] == ("TTS_TIMEOUT" if status == 504 else "TTS_FAILED")
+        diagnostic = {"provider": "typecast", "stage": "response_headers", "reason": reason}
+        if send is rejected:
+            diagnostic["upstream_status"] = 402
+        assert error["diagnostics"] == diagnostic
         assert expected in caplog.text and error["request_id"] in caplog.text
         assert "elapsed_ms=" in caplog.text
         for private in ("private speech", "secret-test-key", "sensitive provider detail"):
-            assert private not in caplog.text
+            assert private not in caplog.text and private not in response.text
 
 
 def test_validation_and_unmatched_route_logs_hide_user_input(authenticated_client, caplog):

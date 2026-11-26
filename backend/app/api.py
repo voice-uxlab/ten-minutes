@@ -52,6 +52,7 @@ from .schemas import (
     SaveReportRequest,
     SaveReportDraftRequest,
     ShareLinkResponse,
+    TTSDiagnostics,
     TTSRequest,
     UpdateCurrentUserRequest,
     VoiceHeartbeatRequest,
@@ -873,7 +874,10 @@ async def tts_stream(
                 "Typecast TTS failed request_id=%r upstream_status=%d elapsed_ms=%.0f",
                 request.state.request_id, upstream.status_code, (anyio.current_time() - started) * 1000,
             )
-            raise APIError(502, "TTS_FAILED", "Speech synthesis failed.")
+            raise APIError(
+                502, "TTS_FAILED", "Speech synthesis failed.",
+                diagnostics=TTSDiagnostics(reason="provider_http_error", upstream_status=upstream.status_code),
+            )
 
         async def chunks():
             iterator = upstream.aiter_bytes()
@@ -904,13 +908,19 @@ async def tts_stream(
             "Typecast TTS timeout request_id=%r stage=response_headers error=%s elapsed_ms=%.0f",
             request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
         )
-        raise APIError(504, "TTS_TIMEOUT", "Speech synthesis timed out.") from exc
+        raise APIError(
+            504, "TTS_TIMEOUT", "Speech synthesis timed out.",
+            diagnostics=TTSDiagnostics(reason="timeout"),
+        ) from exc
     except httpx.RequestError as exc:
         logger.warning(
             "Typecast TTS failed request_id=%r transport_error=%s elapsed_ms=%.0f",
             request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
         )
-        raise APIError(502, "TTS_FAILED", "Speech synthesis failed.") from exc
+        raise APIError(
+            502, "TTS_FAILED", "Speech synthesis failed.",
+            diagnostics=TTSDiagnostics(reason="transport_error"),
+        ) from exc
     finally:
         if not forwarded:
             await cleanup()
