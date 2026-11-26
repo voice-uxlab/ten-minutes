@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -8,7 +8,7 @@ import anyio
 import httpx
 from fastapi import APIRouter, Depends, Header, Path as PathParameter, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -23,6 +23,7 @@ from .models import (
     ConsultationCard,
     ConsultationEvent,
     ConsultationReport,
+    ConsultationReportDraft,
     RealtimeCall,
     ShareLink,
     TarotCard,
@@ -30,6 +31,7 @@ from .models import (
     ensure_utc,
 )
 from .openapi import AUTHENTICATED_RESPONSES, PUBLIC_RESPONSES, error_response
+from .reports import mark_consultation_ended, process_due_report
 from .schemas import (
     CardRevealResponse,
     CardSelectionRequest,
@@ -47,6 +49,7 @@ from .schemas import (
     ReportResponse,
     SPREAD_POSITIONS,
     SaveReportRequest,
+    SaveReportDraftRequest,
     ShareLinkResponse,
     TTSRequest,
     UpdateCurrentUserRequest,
@@ -408,27 +411,72 @@ def end_consultation(
     settings: Settings = Depends(get_settings),
 ):
     consultation = owned_consultation(db, consultation_id, user, lock=True)
-    if consultation.status != "ENDED":
-        consultation.status = "ENDED"
-        consultation.end_reason = body.reason
-        consultation.ended_at = datetime.now(timezone.utc)
-        db.execute(update(RealtimeCall).where(
-            RealtimeCall.consultation_id == consultation.id,
-            RealtimeCall.closed_at.is_(None),
-            RealtimeCall.hangup_at > consultation.ended_at,
-        ).values(hangup_at=consultation.ended_at))
+    mark_consultation_ended(db, consultation, body.reason, datetime.now(timezone.utc))
     result = consultation_response(consultation)
-    needs_hangup = bool(consultation.voice_reservation) or db.scalar(
+    needs_hangup = not body.defer_voice_cleanup and (bool(consultation.voice_reservation) or db.scalar(
         select(RealtimeCall.id).where(
             RealtimeCall.consultation_id == consultation.id, RealtimeCall.closed_at.is_(None)
         ).limit(1)
-    )
+    ))
     db.commit()
     if needs_hangup:
         if not settings.openai_api_key:
             raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
         close_consultation_calls(db, str(consultation_id), settings.openai_api_key)
     return result
+
+
+@router.put(
+    "/consultations/{consultation_id}/report-draft",
+    status_code=204,
+    tags=["reports"],
+    summary="Save a short consultation checkpoint",
+)
+def save_report_draft(
+    consultation_id: UUID,
+    body: SaveReportDraftRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    consultation = owned_consultation(db, consultation_id, user, lock=True)
+    active_consultation(consultation)
+    if consultation.report:
+        raise APIError(409, "REPORT_LOCKED", "The saved report cannot be overwritten.")
+    revealed = {card.slot for card in consultation.cards if card.revealed_at is not None}
+    if any(reading.slot not in revealed for reading in body.readings):
+        raise APIError(422, "INVALID_REPORT_READINGS", "Only revealed cards can have report notes.")
+    draft = consultation.report_draft
+    if draft is None:
+        draft = consultation.report_draft = ConsultationReportDraft(
+            run_at=consultation.call_ends_at,
+            expires_at=consultation.call_ends_at + timedelta(hours=24),
+            readings={},
+        )
+    if body.summary is not None:
+        draft.summary = body.summary
+    draft.readings = {
+        **draft.readings,
+        **{str(reading.slot): reading.text for reading in body.readings},
+    }
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post(
+    "/consultations/{consultation_id}/report/generate",
+    status_code=204,
+    tags=["reports"],
+    summary="Process a due report for an ended consultation",
+)
+def generate_consultation_report(
+    consultation_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+):
+    owned_consultation(db, consultation_id, user)
+    process_due_report(db, settings, str(consultation_id))
+    return Response(status_code=204)
 
 
 @router.put(
@@ -485,6 +533,7 @@ def save_report(
             readings=normalized_readings,
             queen_line=body.queen_line,
         )
+        consultation.report_draft = None
         db.commit()
         db.refresh(consultation)
     return report_response(consultation)
@@ -497,6 +546,7 @@ def save_report(
     summary="Get private report",
     description="Returns the question, card images, per-card readings, situation summary, and closing message to the consultation owner only.",
     responses={
+        202: {"description": "A report is pending generation"},
         404: error_response(
             404,
             examples={
@@ -514,6 +564,8 @@ def get_report(
 ):
     consultation = owned_consultation(db, consultation_id, user)
     if not consultation.report:
+        if consultation.status == "ENDED" and consultation.report_draft:
+            return Response(status_code=202, headers={"Cache-Control": "no-store"})
         raise APIError(404, "REPORT_NOT_FOUND", "The report was not found.")
     return report_response(consultation)
 
@@ -699,21 +751,36 @@ def voice_heartbeat(
     return Response(status_code=204)
 
 
-@router.post("/internal/voice-cleanup", status_code=204, include_in_schema=False)
-def voice_cleanup(
-    authorization: str = Header(default=""),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
+def authorize_scheduled_job(authorization: str, settings: Settings) -> None:
     secret = settings.voice_cleanup_secret
     scheme, _, token = authorization.partition(" ")
     if not secret or not token or scheme.lower() != "bearer" or not secrets.compare_digest(
         token.encode(), secret.get_secret_value().encode(),
     ):
         raise APIError(401, "VOICE_CLEANUP_UNAUTHORIZED", "A valid cleanup token is required.")
+
+
+@router.post("/internal/voice-cleanup", status_code=204, include_in_schema=False)
+def voice_cleanup(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    authorize_scheduled_job(authorization, settings)
     if not settings.openai_api_key:
         raise APIError(503, "VOICE_NOT_CONFIGURED", "The voice provider is not configured.")
     close_inactive_voice_calls(db, settings.openai_api_key)
+    return Response(status_code=204)
+
+
+@router.post("/internal/report-generation", status_code=204, include_in_schema=False)
+def scheduled_report_generation(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    authorize_scheduled_job(authorization, settings)
+    process_due_report(db, settings)
     return Response(status_code=204)
 
 

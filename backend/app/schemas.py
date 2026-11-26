@@ -148,7 +148,8 @@ class ConsultationResponse(StrictModel):
     deck_size: int = Field(description="Number of cards in the shuffled server deck; currently 78")
     expected_card_count: int = Field(description="Number of cards required by the consultation; currently 3")
     cards: list[CardResponse] = Field(description="Selected cards, or an empty array before selection")
-    report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report exists")
+    report_status: Optional[ReportStatus] = Field(description="Report state, or null when no report work is pending")
+    has_report_draft: bool = Field(description="Whether a report checkpoint is stored")
     created_at: datetime = Field(description="Consultation creation timestamp")
     ended_at: Optional[datetime] = Field(description="Consultation end timestamp, or null while active")
     call_ends_at: datetime = Field(description="Server deadline for the ten-minute call")
@@ -218,6 +219,7 @@ class CardRevealResponse(StrictModel):
 
 class EndConsultationRequest(StrictModel):
     reason: str = Field(description="Termination reason: USER, TIMEOUT, or ERROR", examples=["USER"])
+    defer_voice_cleanup: bool = Field(default=False, description="Leave provider hangup to scheduled cleanup")
 
     @field_validator("reason")
     @classmethod
@@ -236,6 +238,26 @@ class SaveReportRequest(StrictModel):
     situation_summary: str = Field(min_length=1, max_length=500, description="One-line situation summary")
     readings: list[CardReading] = Field(description="Per-slot readings for every revealed card")
     queen_line: str = Field(min_length=1, max_length=300, description="Closing message displayed in the report")
+
+
+class ReportMemo(StrictModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    slot: int = Field(ge=1, le=10)
+    text: str = Field(min_length=1, max_length=300)
+
+
+class SaveReportDraftRequest(StrictModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    summary: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    readings: list[ReportMemo] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_checkpoint(self):
+        if not self.summary and not self.readings:
+            raise ValueError("a summary or reading is required")
+        if len({reading.slot for reading in self.readings}) != len(self.readings):
+            raise ValueError("reading slots must be unique")
+        return self
 
 
 class ReportResponse(StrictModel):

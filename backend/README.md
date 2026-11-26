@@ -107,6 +107,7 @@ OPENAI_REALTIME_PROMPT_VERSION=5
 - FastAPI가 생성·종료하는 OpenAI Realtime WebRTC 연결과 상담 도구, Typecast 1.3배 WAV 스트리밍 프록시
 - 같은 상담으로 재연결
 - 상담 이벤트, 공개된 카드 기준으로 조기 종료 리포트 저장/조회
+- 상담 요약과 공개 카드의 해석 메모 저장, 예약 작업을 통한 리포트 생성
 - 후킹 문구 기반 공유 링크 생성과 공유 미리보기 조회
 
 공개 공유 API는 질문, 카드, 카드별 해석, 상황 요약, “언니”의 한마디를 반환하지 않습니다. 개인 리포트 전문은 인증된 상담 소유자만 조회할 수 있습니다.
@@ -114,8 +115,18 @@ OPENAI_REALTIME_PROMPT_VERSION=5
 
 ### 음성 종료
 
-사용자가 종료 버튼을 누르면 FastAPI가 OpenAI Realtime 연결에 종료 요청을 보냅니다.
+사용자가 종료 버튼을 누르면 FastAPI가 상담 종료를 기록한 뒤 OpenAI Realtime 연결을 정리합니다.
+리포트 메모가 있는 경우 브라우저는 종료 기록을 받은 뒤 통화 종료와 리포트 생성 요청을 각각 보냅니다.
 실패 시 같은 종료 요청을 다시 보낼 수 있습니다. 배포 환경에서는 [Supabase 예약 작업](../docs/deployment.md#음성-상담-배포)이
 브라우저의 연결 유지 신호가 끊긴 통화를 정리합니다.
+
+### 리포트 생성
+
+상담 중 확정 질문을 바탕으로 요약과 공개 카드별 짧은 해석 메모를 저장합니다. 종료를
+기록하면 메모가 리포트 생성 대상으로 바뀝니다. 탭을 닫아 종료 요청이 오지 않은 경우
+예약 작업은 상담의 10분 기한이 지난 뒤 마지막 저장 내용으로 처리합니다.
+`OPENAI_REPORT_MODEL`의 기본값은 `gpt-4.1-mini`입니다. 모델 요청을 재시도해도
+실패하면 저장된 메모로 기본 리포트를 작성합니다. 초안은 리포트 저장 시 삭제되며
+완료되지 않은 작업은 상담 기한 24시간 후부터 예약 정리 대상입니다.
 
 기본 한도는 계정당 동시 통화 1개, 상담당 연결 시도 4회, 계정당 하루 연결 시도 20회, 상담당 TTS 12,000자, 계정당 하루 TTS 60,000자, 상담당 동시 TTS 요청 4개다. 환경변수 `VOICE_CONNECTIONS_PER_CONSULTATION`, `VOICE_CONNECTIONS_PER_ACCOUNT_DAY`, `TTS_CHARACTERS_PER_CONSULTATION`, `TTS_CHARACTERS_PER_ACCOUNT_DAY`, `TTS_PARALLEL_REQUESTS`로 조정할 수 있다.
