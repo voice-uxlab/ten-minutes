@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -6,7 +7,7 @@ from uuid import UUID
 
 import anyio
 import httpx
-from fastapi import APIRouter, Depends, Header, Path as PathParameter, Query, Response
+from fastapi import APIRouter, Depends, Header, Path as PathParameter, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -75,6 +76,7 @@ from .voice import (
 )
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", responses=AUTHENTICATED_RESPONSES)
 public_router = APIRouter(prefix="/api/v1", tags=["shares"], responses=PUBLIC_RESPONSES)
 
@@ -810,6 +812,7 @@ def scheduled_report_generation(
     },
 )
 async def tts_stream(
+    request: Request,
     body: TTSRequest,
     consultation_id: UUID = PathParameter(description="Active consultation ID for audio synthesis"),
     db: Session = Depends(get_db),
@@ -843,9 +846,10 @@ async def tts_stream(
             with anyio.move_on_after(5, shield=True):
                 await run_in_threadpool(release_tts, bind, consultation_key, lease)
 
+    started = anyio.current_time()
     forwarded = False
     try:
-        request = client.build_request(
+        provider_request = client.build_request(
             "POST",
             "https://api.typecast.ai/v1/text-to-speech/stream",
             headers={"X-API-KEY": settings.typecast_api_key},
@@ -863,8 +867,12 @@ async def tts_stream(
             },
         )
         with anyio.fail_after(max(0, min(15, end_time - anyio.current_time()))):
-            upstream = await client.send(request, stream=True)
+            upstream = await client.send(provider_request, stream=True)
         if not upstream.is_success:
+            logger.warning(
+                "Typecast TTS failed request_id=%r upstream_status=%d elapsed_ms=%.0f",
+                request.state.request_id, upstream.status_code, (anyio.current_time() - started) * 1000,
+            )
             raise APIError(502, "TTS_FAILED", "Speech synthesis failed.")
 
         async def chunks():
@@ -877,6 +885,12 @@ async def tts_stream(
                     yield chunk
             except StopAsyncIteration:
                 pass
+            except (httpx.RequestError, TimeoutError) as exc:
+                logger.error(
+                    "Typecast TTS interrupted request_id=%r stage=audio_stream error=%s elapsed_ms=%.0f",
+                    request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
+                )
+                raise
             finally:
                 await cleanup()
 
@@ -886,8 +900,16 @@ async def tts_stream(
             headers={"Cache-Control": "no-store"}, background=BackgroundTask(cleanup),
         )
     except (httpx.TimeoutException, TimeoutError) as exc:
+        logger.warning(
+            "Typecast TTS timeout request_id=%r stage=response_headers error=%s elapsed_ms=%.0f",
+            request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
+        )
         raise APIError(504, "TTS_TIMEOUT", "Speech synthesis timed out.") from exc
     except httpx.RequestError as exc:
+        logger.warning(
+            "Typecast TTS failed request_id=%r transport_error=%s elapsed_ms=%.0f",
+            request.state.request_id, type(exc).__name__, (anyio.current_time() - started) * 1000,
+        )
         raise APIError(502, "TTS_FAILED", "Speech synthesis failed.") from exc
     finally:
         if not forwarded:
