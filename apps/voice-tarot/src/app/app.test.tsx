@@ -129,6 +129,27 @@ test("OAuth return without a valid session displays the lookup status", async ()
   );
 });
 
+test.each(["missing", "rejected"])(
+  "OAuth return reports a %s session cookie even without session storage",
+  async (cookie) => {
+    const requestId = `req_${"a".repeat(32)}`;
+    history.replaceState({}, "", "/?auth_callback=session_issued");
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ error: {
+        message: `The session cookie was ${cookie}.`,
+        request_id: requestId,
+      } }, { status: 401 }),
+    );
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("콜백 응답에서 세션 쿠키 발급 확인");
+    expect(alert.textContent).toContain(`SESSION_COOKIE_${cookie.toUpperCase()}`);
+    expect(alert.textContent).toContain(requestId);
+    await waitFor(() => expect(window.location.search).toBe(""));
+  },
+);
+
 test("returning to the login page after leaving for OAuth restores retry", async () => {
   history.replaceState({}, "", "/login");
   render(<App />);

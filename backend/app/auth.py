@@ -99,9 +99,20 @@ def current_user_optional(
     return db.get(User, service_session.user_id)
 
 
-def current_user(user: Optional[User] = Depends(current_user_optional)) -> User:
+def current_user(
+    request: Request,
+    user: Optional[User] = Depends(current_user_optional),
+    settings: Settings = Depends(get_settings),
+) -> User:
     if not user:
-        raise APIError(401, "AUTHENTICATION_REQUIRED", "Authentication is required.")
+        message = "Authentication is required."
+        if request.method == "GET" and request.url.path == "/api/v1/users/me":
+            message = (
+                "The session cookie was rejected."
+                if settings.session_cookie_name in request.cookies
+                else "The session cookie was missing."
+            )
+        raise APIError(401, "AUTHENTICATION_REQUIRED", message)
     return user
 
 
@@ -289,7 +300,9 @@ async def callback(
     cookie_name = oauth_cookie_name(provider, settings)
     binding = request.cookies.get(cookie_name)
     now = datetime.now(timezone.utc)
-    if not binding or db.scalar(
+    if not binding:
+        raise APIError(400, "OAUTH_STATE_INVALID", "The OAuth attempt cookie was missing.")
+    if db.scalar(
         update(OAuthAttempt)
         .where(
             OAuthAttempt.state_hash == token_hash(state),
@@ -305,7 +318,7 @@ async def callback(
     db.commit()
     response = RedirectResponse(
         f"{settings.public_web_origin.rstrip('/')}?auth_error=cancelled"
-        if error or not code else settings.public_web_origin.rstrip("/"),
+        if error or not code else f"{settings.public_web_origin.rstrip('/')}/?auth_callback=session_issued",
         status_code=302,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
     )

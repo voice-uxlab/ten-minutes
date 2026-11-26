@@ -42,6 +42,7 @@
 
 - 성공 또는 실패 모두 정해진 FE 화면으로 `302` redirect
 - 성공 시 `Set-Cookie`로 서비스 세션 발급
+- 성공 리다이렉트에는 `auth_callback=session_issued`가 포함된다. 이 값은 콜백 응답이 세션 쿠키를 발급했다는 진단 표시이며, 로그인 상태는 `/api/v1/users/me`에서 확인한다.
 - OAuth token을 JSON 또는 URL에 포함하지 않음
 
 ### 1.3 Logout
@@ -71,6 +72,8 @@
 ```
 
 프로필 표시명, 이미지, 이메일은 사용 목적과 Provider 동의 범위를 정한 뒤 추가한다.
+
+`401 AUTHENTICATION_REQUIRED` 응답은 세션 쿠키가 요청에 없었는지, 받은 쿠키로 유효한 세션을 확인할 수 없었는지 `error.message`에 표시한다. 응답에 쿠키 값은 포함하지 않는다.
 
 ### 2.2 현재 사용자 수정
 

@@ -699,10 +699,22 @@ def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch)
         assert "HttpOnly" in start.headers["set-cookie"] and "SameSite=lax" in start.headers["set-cookie"]
         path = f"/auth/{provider}/callback"
         params = {"state": state, "code": "test-code"}
-        assert other.get(path, params=params, follow_redirects=False).status_code == 400
+        missing_attempt = other.get(path, params=params, follow_redirects=False)
+        assert missing_attempt.status_code == 400
+        assert missing_attempt.json()["error"]["message"] == "The OAuth attempt cookie was missing."
         cookie_name = auth.oauth_cookie_name(provider, settings)
         binding = browser.cookies.get(cookie_name)
-        assert browser.get(path, params=params, follow_redirects=False).status_code == 302
+        callback = browser.get(path, params=params, follow_redirects=False)
+        assert callback.status_code == 302
+        assert urlsplit(callback.headers["location"]).query == "auth_callback=session_issued"
+        assert settings.session_cookie_name in callback.cookies
+        missing_session = other.get("/api/v1/users/me")
+        assert missing_session.status_code == 401
+        assert missing_session.json()["error"]["message"] == "The session cookie was missing."
+        other.cookies.set(settings.session_cookie_name, "unknown-session")
+        rejected_session = other.get("/api/v1/users/me")
+        assert rejected_session.status_code == 401
+        assert rejected_session.json()["error"]["message"] == "The session cookie was rejected."
         assert browser.get("/api/v1/users/me").status_code == 200
         browser.cookies.set(cookie_name, binding)
         assert browser.get(path, params=params, follow_redirects=False).status_code == 400
