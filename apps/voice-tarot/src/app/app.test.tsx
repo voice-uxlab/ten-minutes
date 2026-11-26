@@ -112,6 +112,23 @@ test("cancelled social login offers retry", async () => {
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
 });
 
+test("failed OAuth initialization displays an authorization diagnostic", async () => {
+  history.replaceState({}, "", "/login?auth_error=failed");
+  render(<App />);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "OAUTH_AUTHORIZE_FAILED",
+  );
+});
+
+test("OAuth return without a valid session displays the lookup status", async () => {
+  sessionStorage.setItem("voice-tarot:login-attempt", "kakao");
+  render(<App />);
+  await waitFor(() => expect(window.location.pathname).toBe("/login"));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "GET /api/v1/users/me · HTTP 401",
+  );
+});
+
 test("returning to the login page after leaving for OAuth restores retry", async () => {
   history.replaceState({}, "", "/login");
   render(<App />);
@@ -124,6 +141,7 @@ test("returning to the login page after leaving for OAuth restores retry", async
   fireEvent(window, new Event("pageshow"));
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("소셜 로그인을 완료할 수 없습니다.");
+  expect(alert.textContent).toContain("OAUTH_RETURN_UNCONFIRMED");
   expect(alert.textContent).toContain("다시 로그인해 주세요.");
   expect(kakao.getAttribute("aria-describedby")).toBe(alert.id);
   expect(screen.queryByRole("link", { name: /로그인 다시 시도/ })).toBeNull();

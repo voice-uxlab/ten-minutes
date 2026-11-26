@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createConsultation, reportsKey } from "@/api/consultations";
+import { FastApiError } from "@/api/client";
 import {
   authOptions,
   authorizeUrl,
@@ -84,7 +85,13 @@ function AuthCheckNotice() {
   );
 }
 
-function Login({ checking = false }: { checking?: boolean }) {
+function Login({
+  checking = false,
+  lookupStatus,
+}: {
+  checking?: boolean;
+  lookupStatus?: number | "unavailable";
+}) {
   const { pathname, search, hash } = useLocation();
   const navigate = useNavigate();
   const [authError, setAuthError] = useState(() =>
@@ -93,7 +100,22 @@ function Login({ checking = false }: { checking?: boolean }) {
   const [attempt, setAttempt] = useState(() =>
     loginProvider(sessionStorage.getItem(loginAttemptKey)),
   );
+  const [retried, setRetried] = useState(false);
   const recentLogin = loginProvider(localStorage.getItem(recentLoginKey));
+  const showRecovery = !checking && Boolean(attempt || authError);
+  const status = retried ? undefined : lookupStatus;
+  let diagnostic = "OAuth 복귀 후 로그인 상태를 확인하지 못했어요. (OAUTH_RETURN_UNCONFIRMED)";
+  if (authError === "failed") {
+    diagnostic = "카카오 인증을 시작하지 못했어요. (OAUTH_AUTHORIZE_FAILED)";
+  } else if (authError && authError !== "cancelled") {
+    diagnostic = "인증 서버가 로그인 실패를 반환했어요. (OAUTH_FAILED)";
+  } else if (status === 401) {
+    diagnostic = "로그인 상태 조회에서 유효한 세션을 확인하지 못했어요. (GET /api/v1/users/me · HTTP 401)";
+  } else if (typeof status === "number") {
+    diagnostic = `로그인 상태 조회 요청이 실패했어요. (GET /api/v1/users/me · HTTP ${status})`;
+  } else if (status === "unavailable") {
+    diagnostic = "로그인 상태 조회 응답을 확인하지 못했어요. (AUTH_LOOKUP_UNAVAILABLE)";
+  }
   useEffect(() => {
     if (checking) return;
     const consumeAttempt = () => {
@@ -115,6 +137,7 @@ function Login({ checking = false }: { checking?: boolean }) {
     navigate({ pathname, search: params.toString(), hash }, { replace: true });
   }, [hash, navigate, pathname, search]);
   function startLogin() {
+    setRetried(true);
     setAttempt(null);
     setAuthError(null);
     sessionStorage.setItem(loginAttemptKey, "kakao");
@@ -130,12 +153,12 @@ function Login({ checking = false }: { checking?: boolean }) {
           className="button glass social-login-button"
           href={authorizeUrl()}
           onClick={startLogin}
-          aria-describedby={attempt || authError ? "login-recovery-message" : undefined}
+          aria-describedby={showRecovery ? "login-recovery-message" : undefined}
         >
           카카오로 시작하기
           {recentLogin && <span className="recent-login-label">최근 로그인</span>}
         </a>
-        {(attempt || authError) && (
+        {showRecovery && (
           <p
             className="login-recovery"
             id="login-recovery-message"
@@ -146,6 +169,7 @@ function Login({ checking = false }: { checking?: boolean }) {
                 ? "로그인을 취소했어요."
                 : "소셜 로그인을 완료할 수 없습니다."}
             </strong>
+            {authError !== "cancelled" && <span>{diagnostic}</span>}
             <span>다시 로그인해 주세요.</span>
           </p>
         )}
@@ -291,7 +315,7 @@ export function Home() {
     [consent, setConsent] = useState(false),
     [record, setRecord] = useState(false),
     [error, setError] = useState("");
-  const { pathname, search } = useLocation();
+  const { pathname, search, state } = useLocation();
   const isLogin = pathname.toLowerCase().replace(/\/+$/, "") === "/login";
   const queryClient = useQueryClient();
   const auth = useQuery({ ...authOptions, enabled: !isLogin });
@@ -349,11 +373,24 @@ export function Home() {
   const nick = auth.data && (auth.data.nickname || "공주");
   if (isLogin || hasAuthError || !nick) {
     const checking = !isLogin && !hasAuthError && auth.isPending;
+    const lookupStatus = isLogin
+      ? state?.lookupStatus
+      : auth.error instanceof FastApiError
+        ? auth.error.status
+        : auth.isError
+          ? "unavailable"
+          : auth.data === null
+            ? 401
+            : undefined;
     return (
       <>
-        <Login checking={checking} />
+        <Login checking={checking} lookupStatus={lookupStatus} />
         {!isLogin && !checking && (
-          <Navigate to={`/login${hasAuthError ? search : ""}`} replace />
+          <Navigate
+            to={`/login${hasAuthError ? search : ""}`}
+            state={{ lookupStatus }}
+            replace
+          />
         )}
       </>
     );

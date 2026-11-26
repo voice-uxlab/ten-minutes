@@ -1,5 +1,5 @@
 import type { QueryFunctionContext } from "@tanstack/react-query";
-import { apiOrigin, fetchApi } from "./client";
+import { apiOrigin, FastApiError, fetchApi } from "./client";
 
 const userPath = "/api/v1/users/me";
 export const consentVersion = import.meta.env.VITE_AUTH_CONSENT_VERSION?.trim();
@@ -33,7 +33,8 @@ export const authOptions = {
   }: QueryFunctionContext): Promise<AuthUser | null> => {
     const response = await fetchApi(userPath, { signal });
     if (response.status === 401) return null;
-    if (!response.ok) throw new Error("로그인 상태를 확인하지 못했어요.");
+    if (!response.ok)
+      throw new FastApiError("로그인 상태를 확인하지 못했어요.", response.status);
     const member: MemberProfile = await response.json();
     return {
       ...member,
