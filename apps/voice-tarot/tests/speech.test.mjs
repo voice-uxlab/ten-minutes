@@ -112,7 +112,7 @@ test("HTTP synthesis preserves sentence order and captions follow scheduled play
       calls.push([text, responseId, index]);
       return new Response(Buffer.concat([header, new Uint8Array(64000)]));
     },
-    onPlaybackStart: (text) => captions.push(text),
+    onCaption: (text) => captions.push(text),
   });
   t.after(() => s.player.close());
   s.player.append("첫 문장.", "same-response");
@@ -131,6 +131,84 @@ test("HTTP synthesis preserves sentence order and captions follow scheduled play
   s.context.currentTime = 2;
   t.mock.timers.tick(2000);
   assert.deepEqual(captions, ["첫 문장."]);
+});
+
+test("captions advance within one synthesis segment using only played audio", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const captions = [];
+  let stream;
+  const s = setup({
+    streamSegment: async () =>
+      new Response(new ReadableStream({ start: (reader) => (stream = reader) })),
+    onCaption: (text, started) => captions.push([text, started]),
+  });
+  t.after(() => s.player.close());
+  s.player.append("첫 문장. 둘 문장. 셋 문장.", "response");
+  stream.enqueue(Buffer.concat([header, new Uint8Array(16000)]));
+  await nextTurn();
+  s.context.currentTime = 0.025;
+  t.mock.timers.tick(25);
+  assert.deepEqual(captions, [["첫 문장.", true]]);
+
+  s.context.currentTime = 5;
+  t.mock.timers.tick(5000);
+  assert.deepEqual(captions, [["첫 문장.", true]]);
+
+  stream.enqueue(new Uint8Array(176000));
+  stream.close();
+  await nextTurn();
+  s.context.currentTime = 5.8;
+  t.mock.timers.tick(800);
+  assert.deepEqual(captions, [["첫 문장.", true], ["둘 문장.", false]]);
+
+  s.player.cancel();
+  s.context.currentTime = 8;
+  t.mock.timers.tick(2200);
+  assert.deepEqual(captions, [["첫 문장.", true], ["둘 문장.", false]]);
+});
+
+test("Typecast NDJSON captions appear at word timestamps, including timestamps without audio", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const captions = [];
+  let stream;
+  const s = setup({
+    streamSegment: async () => new Response(
+      new ReadableStream({ start: (reader) => (stream = reader) }),
+      { headers: { "content-type": "application/x-ndjson; charset=utf-8" } },
+    ),
+    onCaption: (text, started) => captions.push([text, started]),
+  });
+  t.after(() => s.player.close());
+  s.player.append("첫 문장. 다음", "response");
+  const line = (audio, words) => Buffer.from(JSON.stringify({ audio, words }));
+  const audio = Buffer.concat([header, new Uint8Array(128000)]).toString("base64");
+  stream.enqueue(Buffer.concat([line(audio, []), Buffer.from("\n")]));
+  await nextTurn();
+  assert.equal(s.played.length, 1);
+  s.context.currentTime = 0.1;
+  t.mock.timers.tick(100);
+  assert.deepEqual(captions, []);
+
+  const timings = line("", [
+    { text: "첫", start: 0.15, end: 0.23 },
+    { text: "문장.", start: 0.6, end: 0.9 },
+    { text: "다음", start: 1.4, end: 1.7 },
+  ]);
+  const split = timings.indexOf(Buffer.from("첫")) + 1;
+  stream.enqueue(timings.subarray(0, split));
+  stream.enqueue(timings.subarray(split));
+  stream.close();
+  await nextTurn();
+
+  s.context.currentTime = 0.2;
+  t.mock.timers.tick(100);
+  assert.deepEqual(captions, [["첫", true]]);
+  s.context.currentTime = 0.7;
+  t.mock.timers.tick(500);
+  assert.deepEqual(captions.at(-1), ["첫 문장.", false]);
+  s.context.currentTime = 1.5;
+  t.mock.timers.tick(800);
+  assert.deepEqual(captions.at(-1), ["다음", false]);
 });
 
 test("invalid HTTP audio stops playback and reports an error", async (t) => {

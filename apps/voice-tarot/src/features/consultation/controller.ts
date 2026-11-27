@@ -156,7 +156,6 @@ export class Consultation {
   private interrupted = false;
   private responseId = "";
   private responseContext?: NoteContext;
-  private caption = "";
   private realtimeSpeechBuffer = "";
   private stopped = false;
   private warned = false;
@@ -468,14 +467,19 @@ export class Consultation {
             });
         },
         onError: (error: Error) => this.failMessage(error),
-        onPlaybackStart: (text: string) => {
+        onCaption: (text, segmentStarted) => {
+          if (this.stopped) return;
+          if (!segmentStarted) {
+            this.update({ caption: text });
+            return;
+          }
           if (this.view.phase === "reading" && this.view.active.length === 1)
             this.readingPlaybackSlot = this.view.active[0];
-          if (this.stopped) return;
           this.update({
-            caption: (this.view.caption + displaySpeech(text)).slice(-600),
+            caption: text,
+            audioPlaying: true,
+            status: "레나가 말하는 중",
           });
-          this.update({ audioPlaying: true, status: "레나가 말하는 중" });
         },
       });
       if (stale()) return;
@@ -578,7 +582,6 @@ export class Consultation {
       if (this.responses.has(r.id)) return;
       this.responses.add(r.id);
       this.responseContext = noteContext(s);
-      this.caption = "";
       this.realtimeSpeechBuffer = "";
       this.responseId = r.id;
       this.responding = true;
@@ -588,7 +591,6 @@ export class Consultation {
     const current =
       e.response_id === this.responseId && !this.interrupted && !this.stopped;
     if (e.type === "response.output_text.delta" && current) {
-      this.caption += e.delta || "";
       this.realtimeSpeechBuffer += e.delta || "";
       // Batch short sentences from one reply before sending them to Typecast.
       const targetLength = 100;

@@ -233,7 +233,7 @@ export function streamSpeech(
   signal: AbortSignal,
 ) {
   return fastApiJson<Response>(
-    `${path(id)}/tts/stream`,
+    `${path(id)}/tts/stream?timestamps=true`,
     "POST",
     {
       text,

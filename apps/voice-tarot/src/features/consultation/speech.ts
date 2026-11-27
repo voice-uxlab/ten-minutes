@@ -7,11 +7,92 @@ interface SpeechTurn {
   first: boolean;
   done: boolean;
   abort: AbortController;
+  playback: PlaybackSpan[];
+  words: TimedWord[] | null;
 }
+
+interface PlaybackSpan {
+  start: number;
+  end: number;
+}
+
+interface TimedWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
+function isTimedWord(word: unknown): word is TimedWord {
+  if (!word || typeof word !== "object") return false;
+  const { text, start, end } = word as Partial<TimedWord>;
+  return (
+    typeof text === "string" &&
+    typeof start === "number" &&
+    typeof end === "number" &&
+    Number.isFinite(start) &&
+    Number.isFinite(end) &&
+    start >= 0 &&
+    end >= start
+  );
+}
+
+async function* audioChunks(
+  response: Response,
+  turn: SpeechTurn,
+  signal: AbortSignal,
+) {
+  const reader = response.body?.getReader();
+  if (!reader) throw Error("합성 오디오 스트림을 받지 못했어요.");
+  const timed =
+    response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      .trim()
+      .toLowerCase() === "application/x-ndjson";
+  const words: TimedWord[] | null = timed ? [] : null;
+  turn.words = words;
+  const decoder = new TextDecoder();
+  let pending = "";
+  try {
+    while (!signal.aborted) {
+      const { value, done } = await reader.read();
+      if (signal.aborted) break;
+      if (!words) {
+        if (done) break;
+        yield value;
+        continue;
+      }
+      const lines = (pending + decoder.decode(value, { stream: !done })).split(
+        "\n",
+      );
+      pending = done ? "" : (lines.pop() ?? "");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const frame: { audio?: unknown; words?: unknown } | null =
+          JSON.parse(line);
+        if (
+          typeof frame?.audio !== "string" ||
+          !Array.isArray(frame.words) ||
+          !frame.words.every(isTimedWord)
+        )
+          throw Error("타입캐스트 자막 스트림을 읽지 못했어요.");
+        words.push(...frame.words);
+        if (frame.audio)
+          yield Uint8Array.from(atob(frame.audio), (byte) =>
+            byte.charCodeAt(0),
+          );
+      }
+      if (done) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
 interface SpeechOptions {
   onState?: (busy: boolean) => void;
   onError?: (error: Error) => void;
-  onPlaybackStart?: (text: string) => void;
+  onCaption?: (text: string, segmentStarted: boolean) => void;
   destination?: AudioNode;
   streamSegment: (
     text: string,
@@ -25,6 +106,31 @@ export function displaySpeech(text: string) {
     .replace(/\[[^\]]*\]/g, "")
     .replace(/\[[^\]]*$/, "")
     .replace(/^ +/, "");
+}
+
+function captionCues(text: string) {
+  const phrases: string[] = [];
+  for (const sentence of text.split(/(?<=[.!?。！？…][”’"']?)\s+/u)) {
+    let phrase = "";
+    for (const word of sentence.match(/\S+/gu) ?? []) {
+      if (phrase && phrase.length + 1 + word.length > 34) {
+        phrases.push(phrase);
+        phrase = "";
+      }
+      for (const part of word.match(/.{1,34}/gu) ?? []) {
+        phrase = phrase ? `${phrase} ${part}` : part;
+        if (phrase.length >= 34) {
+          phrases.push(phrase);
+          phrase = "";
+        }
+      }
+    }
+    if (phrase) phrases.push(phrase);
+  }
+  return phrases.map((phrase) => ({
+    text: phrase,
+    weight: phrase.replace(/\s/g, "").length,
+  }));
 }
 
 function wavSampleRate(header: Uint8Array) {
@@ -53,14 +159,13 @@ export class SpeechPlayer {
   private readonly destination: AudioNode;
   private readonly onState: NonNullable<SpeechOptions["onState"]>;
   private readonly onError: NonNullable<SpeechOptions["onError"]>;
-  private readonly onPlaybackStart: NonNullable<
-    SpeechOptions["onPlaybackStart"]
-  >;
+  private readonly onCaption: NonNullable<SpeechOptions["onCaption"]>;
   private readonly streamSegment: SpeechOptions["streamSegment"];
   private readonly sources = new Set<AudioBufferSourceNode>();
   private readonly captionTimers = new Set<ReturnType<typeof setTimeout>>();
   private turns: SpeechTurn[] = [];
   private nextAt = 0;
+  private captionStart = -Infinity;
   private sampleRate = 32000;
   private streaming = false;
   private streamResponse = "";
@@ -72,7 +177,7 @@ export class SpeechPlayer {
     {
       onState = () => {},
       onError = () => {},
-      onPlaybackStart = () => {},
+      onCaption = () => {},
       destination = context.destination,
       streamSegment,
     }: SpeechOptions,
@@ -81,7 +186,7 @@ export class SpeechPlayer {
     this.destination = destination;
     this.onState = onState;
     this.onError = onError;
-    this.onPlaybackStart = onPlaybackStart;
+    this.onCaption = onCaption;
     this.streamSegment = streamSegment;
   }
 
@@ -108,6 +213,8 @@ export class SpeechPlayer {
         responseId,
         index: this.segmentIndex++,
         abort: new AbortController(),
+        playback: [],
+        words: null,
       });
     }
     this.onState(true);
@@ -131,29 +238,21 @@ export class SpeechPlayer {
             turn.index,
             signal,
           );
-          const reader = response.body?.getReader();
-          if (!reader) throw Error("합성 오디오 스트림을 받지 못했어요.");
           const header = new Uint8Array(44);
           let headerSize = 0;
-          try {
-            while (!signal.aborted) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              if (signal.aborted) break;
-              const size = Math.min(header.length - headerSize, value.length);
-              if (size) {
-                header.set(value.subarray(0, size), headerSize);
-                headerSize += size;
-                if (headerSize < header.length) continue;
-                this.sampleRate = wavSampleRate(header);
-              }
-              if (value.length > size) {
-                turn.audio.push(value.subarray(size));
-                this.drain();
-              }
+          for await (const value of audioChunks(response, turn, signal)) {
+            if (signal.aborted) break;
+            const size = Math.min(header.length - headerSize, value.length);
+            if (size) {
+              header.set(value.subarray(0, size), headerSize);
+              headerSize += size;
+              if (headerSize < header.length) continue;
+              this.sampleRate = wavSampleRate(header);
             }
-          } finally {
-            await reader.cancel().catch(() => {});
+            if (value.length > size) {
+              turn.audio.push(value.subarray(size));
+              this.drain();
+            }
           }
           if (turn.abort.signal.aborted) continue;
           if (signal.aborted) throw Error("음성 응답 시간이 초과됐어요.");
@@ -206,23 +305,12 @@ export class SpeechPlayer {
         const at = Math.max(this.context.currentTime + 0.025, this.nextAt);
         source.start(at);
         this.nextAt = at + buffer.duration;
+        const span = turn.playback.at(-1);
+        if (span?.end === at) span.end = this.nextAt;
+        else turn.playback.push({ start: at, end: this.nextAt });
         if (turn.first) {
           turn.first = false;
-          // Follow the audio clock, including queued audio and suspended contexts.
-          const notify = () => {
-            this.captionTimers.delete(timer);
-            if (this.closed) return;
-            const remaining = at - this.context.currentTime;
-            if (remaining > 0 || this.context.state === "suspended") {
-              timer = setTimeout(notify, Math.max(16, remaining * 1000));
-              this.captionTimers.add(timer);
-            } else this.onPlaybackStart(turn.text);
-          };
-          let timer = setTimeout(
-            notify,
-            Math.max(0, (at - this.context.currentTime) * 1000),
-          );
-          this.captionTimers.add(timer);
+          this.followCaption(turn, at);
         }
       }
       if (!turn.done) break;
@@ -232,9 +320,74 @@ export class SpeechPlayer {
     }
     if (!this.busy) this.onState(false);
   }
+
+  private followCaption(turn: SpeechTurn, start: number) {
+    const cues = turn.words ? [] : captionCues(turn.text);
+    const totalWeight = cues.reduce((sum, cue) => sum + cue.weight, 0);
+    let shown = -1;
+    let wordIndex = 0;
+    let phrase = "";
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = (delay: number) => {
+      timer = setTimeout(notify, delay);
+      this.captionTimers.add(timer);
+    };
+    const notify = () => {
+      this.captionTimers.delete(timer);
+      if (start < this.captionStart) return;
+      const now = this.context.currentTime;
+      if (now < start || this.context.state === "suspended") {
+        schedule(Math.max(16, (start - now) * 1000));
+        return;
+      }
+      this.captionStart = start;
+      let played = 0;
+      let queued = 0;
+      for (const span of turn.playback) {
+        played += Math.max(0, Math.min(now, span.end) - span.start);
+        queued += span.end - span.start;
+      }
+      if (turn.words) {
+        const previous = phrase;
+        while (
+          wordIndex < turn.words.length &&
+          turn.words[wordIndex].start <= played
+        ) {
+          const text = turn.words[wordIndex++].text.trim();
+          if (!text) continue;
+          const combined = phrase ? `${phrase} ${text}` : text;
+          phrase =
+            combined.length > 34 || /[.!?。！？…][”’"']?$/u.test(phrase)
+              ? text
+              : combined;
+        }
+        if (!turn.done || (wordIndex < turn.words.length && played < queued))
+          schedule(50);
+        if (phrase !== previous) this.onCaption(phrase, previous === "");
+        return;
+      }
+      // WAV has no word timestamps. Use the audio duration once the stream ends.
+      const duration = turn.done ? queued : Math.max(queued, totalWeight / 7);
+      const progress = (played / duration) * totalWeight;
+      let index = 0;
+      let boundary = cues[0].weight;
+      while (index < cues.length - 1 && progress >= boundary) {
+        index++;
+        boundary += cues[index].weight;
+      }
+      if (index < cues.length - 1) schedule(50);
+      if (index > shown) {
+        const started = shown === -1;
+        shown = index;
+        this.onCaption(cues[index].text, started);
+      }
+    };
+    schedule(Math.max(0, (start - this.context.currentTime) * 1000));
+  }
   cancel() {
     for (const timer of this.captionTimers) clearTimeout(timer);
     this.captionTimers.clear();
+    this.captionStart = -Infinity;
     for (const turn of this.turns) turn.abort.abort();
     this.turns = [];
     for (const source of this.sources) {

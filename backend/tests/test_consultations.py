@@ -523,6 +523,7 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
         monkeypatch.setattr(settings, field, value)
     calls = []
     tts = []
+    timestamp_stream = b'{"audio":"d2F2LXRlc3Q=","words":[{"text":"test","start":0,"end":1}]}\n'
     def provider_response(self, url, **kwargs):
         calls.append((url, kwargs))
         if url.endswith("/hangup"):
@@ -533,7 +534,9 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
         )
 
     async def tts_response(self, request, **kwargs):
-        tts.append(json.loads(request.content))
+        tts.append((str(request.url), json.loads(request.content)))
+        if request.url.path.endswith("/with-timestamps"):
+            return httpx.Response(200, content=timestamp_stream, headers={"content-type": "application/x-ndjson"})
         return httpx.Response(200, content=b"wav-test", headers={"content-type": "audio/wav"})
 
     monkeypatch.setattr(httpx.Client, "post", provider_response)
@@ -573,8 +576,12 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
 
     audio = client.request("POST", f"{path}/tts/stream", json=speech)
     assert audio.status_code == 200 and audio.content == b"wav-test"
-    assert tts[0]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
-    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 200
+    assert tts[0][0] == "https://api.typecast.ai/v1/text-to-speech/stream"
+    assert tts[0][1]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
+    timed_audio = client.request("POST", f"{path}/tts/stream?timestamps=true", json=speech)
+    assert timed_audio.status_code == 200 and timed_audio.content == timestamp_stream
+    assert timed_audio.headers["content-type"] == "application/x-ndjson"
+    assert tts[1] == ("https://api.typecast.ai/v1/text-to-speech/stream/with-timestamps?granularity=word", tts[0][1])
     assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 429
     assert len(tts) == 2
 

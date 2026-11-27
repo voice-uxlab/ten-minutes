@@ -168,9 +168,9 @@
 
 **Response `200`**
 
-- `StreamingResponse`
-- `Content-Type`: `audio/wav` 스트림, 합성 속도 1.3배
-- JSON body 없음
+- 기본 응답은 `audio/wav` 바이트 스트림이다.
+- `?timestamps=true`를 보내면 `application/x-ndjson` 스트림을 반환한다. 각 줄의 `audio`는 Base64 WAV 조각이고, `words`는 단어와 재생 시작·종료 시간(`text`, `start`, `end`)을 담는다. `audio`가 빈 줄에는 타임스탬프만 올 수 있다.
+- 두 응답의 합성 속도는 1.3배다. 타임스탬프는 템포 적용 후 해당 합성 구간의 시작부터 잰 초 단위이며, 해당 단어의 오디오가 전송된 뒤 도착할 수 있다.
 
 FastAPI 연결이 활성 상태여야 하고, 상담 종료 시각을 넘긴 합성은 허용하지 않는다.
 상담별/계정별 합성 글자 수나 동시 합성 요청 제한을 초과하면 `429`다.

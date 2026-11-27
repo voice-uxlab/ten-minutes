@@ -791,11 +791,14 @@ def scheduled_report_generation(
     "/consultations/{consultation_id}/tts/stream",
     tags=["voice"],
     summary="Stream Typecast audio",
-    description="Sends one segment of an OpenAI text response to Typecast and streams the synthesized audio to the client.",
+    description="Streams synthesized Typecast audio, with optional word timestamps.",
     responses={
         200: {
-            "description": "Audio byte stream using the Content-Type returned by Typecast",
-            "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
+            "description": "WAV audio by default, or NDJSON with audio and word timestamps when timestamps=true",
+            "content": {
+                "audio/wav": {"schema": {"type": "string", "format": "binary"}},
+                "application/x-ndjson": {"schema": {"type": "string"}},
+            },
         },
         404: CONSULTATION_NOT_FOUND_RESPONSE,
         409: error_response(
@@ -816,6 +819,7 @@ async def tts_stream(
     request: Request,
     body: TTSRequest,
     consultation_id: UUID = PathParameter(description="Active consultation ID for audio synthesis"),
+    timestamps: bool = Query(default=False, description="Stream audio and word timestamps as NDJSON"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
     settings: Settings = Depends(get_settings),
@@ -850,9 +854,12 @@ async def tts_stream(
     started = anyio.current_time()
     forwarded = False
     try:
+        provider_url = "https://api.typecast.ai/v1/text-to-speech/stream"
+        if timestamps:
+            provider_url += "/with-timestamps?granularity=word"
         provider_request = client.build_request(
             "POST",
-            "https://api.typecast.ai/v1/text-to-speech/stream",
+            provider_url,
             headers={"X-API-KEY": settings.typecast_api_key},
             json={
                 "voice_id": settings.typecast_voice_id,
@@ -898,9 +905,13 @@ async def tts_stream(
             finally:
                 await cleanup()
 
+        content_type = upstream.headers.get("content-type", "application/octet-stream")
+        if timestamps and content_type.split(";", 1)[0].strip().lower() != "application/x-ndjson":
+            raise APIError(502, "TTS_FAILED", "The speech provider returned an unexpected stream format.")
+
         forwarded = True
         return StreamingResponse(
-            chunks(), media_type=upstream.headers.get("content-type", "application/octet-stream"),
+            chunks(), media_type=content_type,
             headers={"Cache-Control": "no-store"}, background=BackgroundTask(cleanup),
         )
     except (httpx.TimeoutException, TimeoutError) as exc:
