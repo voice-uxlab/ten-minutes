@@ -1,11 +1,11 @@
 import { Cards } from "@/components/cards";
 import { useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { authOptions } from "@/api/auth";
+import { AuthSessionError, authOptions } from "@/api/auth";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { listReports, reportOptions, reportsKey } from "@/api/consultations";
 import { FastApiError } from "@/api/client";
-import { BrandHeader, MetallicIcon, Panel } from "@/components/tarot";
+import { BrandHeader, LoadingPage, LoadingWave, MetallicIcon, Panel } from "@/components/tarot";
 import { Button } from "@/components/ui/button";
 export function ReportPage() {
   const { id = "" } = useParams(),
@@ -33,14 +33,9 @@ export function ReportPage() {
       }
     }
   }
-  if (report.isPending) return <p role="status">리포트를 불러오고 있어요.</p>;
+  if (report.isPending) return <LoadingPage message="리포트를 불러오고 있어요." />;
   if (pending && !report.error)
-    return (
-      <section className="page">
-        <p role="status">저장된 상담 메모로 리포트를 만들고 있어요.</p>
-        <Link to="/reports">내 리포트 목록</Link>
-      </section>
-    );
+    return <LoadingPage message="저장된 상담 메모로 리포트를 만들고 있어요." />;
   if (report.error instanceof FastApiError && report.error.status === 401)
     return <Navigate to="/login" replace />;
   if (
@@ -112,21 +107,20 @@ export function ReportPage() {
 
 export function ReportsPage() {
   const auth = useQuery(authOptions);
+  const user = auth.error instanceof AuthSessionError ? null : auth.data;
   const history = useInfiniteQuery({
     queryKey: reportsKey,
-    enabled: !!auth.data,
+    enabled: !!user,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => listReports(pageParam, signal),
     getNextPageParam: (page) => page.next_cursor ?? undefined,
   });
   if (auth.isPending) {
     return (
-      <section className="page" role="status">
-        로그인 상태를 확인하고 있어요.
-      </section>
+      <LoadingPage message="로그인 상태를 확인하고 있어요." />
     );
   }
-  if (!auth.data) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
   const reports =
     history.data?.pages.flatMap((page) =>
       page.items.filter((item) => item.report_status === "COMPLETED"),
@@ -141,7 +135,7 @@ export function ReportsPage() {
       <h1>내 리포트</h1>
       <p>언니와 나눈 10분, 다시 꺼내봐.</p>
       <p className="hint">최근 상담순</p>
-      {history.isPending && <p role="status">리포트를 불러오고 있어요.</p>}
+      {history.isPending && <p role="status"><LoadingWave />리포트를 불러오고 있어요.</p>}
       {history.isError && (
         <>
           <p role="alert">리포트 목록을 불러오지 못했어요.</p>

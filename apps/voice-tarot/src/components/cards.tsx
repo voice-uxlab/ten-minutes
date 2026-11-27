@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import type { Card } from "@/api/types";
 import { cardImage } from "./card-image";
@@ -16,31 +16,47 @@ const TarotCard = memo(function TarotCard({
   hidden: boolean;
 }) {
   const reduced = useReducedMotion();
-  const image = open ? cardImage(card.id) : cardBack;
+  const [initiallyOpen] = useState(open);
+  const [artwork, setArtwork] = useState<{ src: string; failed: boolean }>();
+  const frontImage = open ? cardImage(card.id) : undefined;
+  const artworkReady = artwork && artwork.src === frontImage;
+  const faceUp = open && (initiallyOpen || !frontImage || artworkReady);
   return (
     <div className={"card-wrap" + (active ? " active" : "")} hidden={hidden}>
-      <motion.div
-        className="tarot-card-face"
-        initial={false}
-        animate={{ rotateY: open ? 0 : 180 }}
-        transition={{ duration: reduced ? 0 : 0.35 }}
-      >
-        {image ? (
-          <img
-            className={
-              open
-                ? card.reversed
-                  ? "tarot-card-reversed"
-                  : undefined
-                : "tarot-card-back"
-            }
-            src={image}
-            alt={open ? card.name : "아직 공개하지 않은 타로 카드"}
-          />
-        ) : (
-          <span>{card.name}</span>
-        )}
-      </motion.div>
+      <div className="tarot-card-visual">
+        <motion.div
+          className="tarot-card-flip"
+          initial={false}
+          animate={{ rotateY: faceUp ? 0 : 180 }}
+          transition={
+            reduced
+              ? { duration: 0 }
+              : { duration: 0.42, delay: 0.12, ease: "easeInOut" }
+          }
+        >
+          <div className="tarot-card-face tarot-card-back">
+            <img
+              src={cardBack}
+              alt={open ? "" : "아직 공개하지 않은 타로 카드"}
+            />
+          </div>
+          {open && (
+            <div className="tarot-card-face">
+              {frontImage && !(artworkReady && artwork?.failed) ? (
+                <img
+                  className={card.reversed ? "tarot-card-reversed" : undefined}
+                  src={frontImage}
+                  alt={card.name}
+                  onLoad={() => setArtwork({ src: frontImage, failed: false })}
+                  onError={() => setArtwork({ src: frontImage, failed: true })}
+                />
+              ) : (
+                <span>{card.name}</span>
+              )}
+            </div>
+          )}
+        </motion.div>
+      </div>
       <span>
         선택 {String(card.number).padStart(2, "0")}
         {open && card.reversed ? " · 역방향" : ""}

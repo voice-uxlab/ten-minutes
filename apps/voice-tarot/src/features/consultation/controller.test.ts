@@ -15,8 +15,8 @@ const audioMock = vi.hoisted(() => ({
     void _busy;
   },
   appended: [] as Array<[string, string]>,
-  playback: (_text: string) => {
-    void _text;
+  playback: (_text: string, _segmentStarted = true) => {
+    void [_text, _segmentStarted];
   },
 }));
 vi.mock("./speech.ts", () => ({
@@ -28,11 +28,12 @@ vi.mock("./speech.ts", () => ({
     constructor(
       _context: unknown,
       options: {
-        onPlaybackStart: (text: string) => void;
+        onCaption: (text: string, segmentStarted: boolean) => void;
         onState: (busy: boolean) => void;
       },
     ) {
-      audioMock.playback = options.onPlaybackStart;
+      audioMock.playback = (text, segmentStarted = true) =>
+        options.onCaption(text, segmentStarted);
       audioMock.state = options.onState;
     }
     append(text: string, responseId: string) {
@@ -231,6 +232,8 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   expect(controller.getSnapshot().session.cards).toHaveLength(0);
   await controller.command("select_numbers", { picks: [79] });
   expect(controller.getSnapshot().retryNumbers).toBe(true);
+  await controller.event({ type: "input_audio_buffer.speech_stopped" });
+  expect(controller.getSnapshot().status).toBe("말해준 번호를 확인하는 중");
   expect(controller.getSnapshot().session.picks).toEqual([7, 22]);
   await controller.command("select_numbers", { picks: [22, 51] });
   expect(controller.getSnapshot().retryNumbers).toBe(false);
@@ -277,6 +280,27 @@ test("partial picks, same-card confirmation, sequential three-card reading, flow
   );
   expect(saved.report?.readings).toHaveLength(3);
 });
+test("batches 100 characters through the next sentence ending and flushes the tail", async () => {
+  mockRealtime();
+  controller = new Consultation(await session());
+  await controller.start();
+  const id = "batched";
+  await controller.event({ type: "response.created", response: { id } });
+  const delta = (text: string) => controller.event({
+    type: "response.output_text.delta", response_id: id, delta: text,
+  });
+  const prefix = "가".repeat(98) + ".";
+  await delta(prefix);
+  await delta(" 다음");
+  expect(audioMock.appended).toHaveLength(0);
+  await delta(" 문장. 끝");
+  expect(audioMock.appended).toEqual([[prefix + " 다음 문장.", id]]);
+  await controller.event({
+    type: "response.output_text.done", response_id: id, text: prefix + " 다음 문장. 끝",
+  });
+  expect(audioMock.appended.at(-1)).toEqual([" 끝", id]);
+});
+
 test("Realtime duplicate tool events mutate once; FastAPI reconnects using the same deadline", async () => {
   mockRealtime();
   controller = new Consultation(await session());
@@ -298,16 +322,19 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
     response_id: "spoken",
     delta: "살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended).toEqual([["카드의 상징을 살펴볼게.", "spoken"]]);
+  expect(audioMock.appended).toHaveLength(0);
   expect(controller.getSnapshot().caption).toBe("");
-  audioMock.playback("카드의 상징을 살펴볼게.");
-  expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게.");
   await controller.event({
     type: "response.output_text.done",
     response_id: "spoken",
     text: "카드의 상징을 살펴볼게. 마지막 말",
   });
-  expect(audioMock.appended.at(-1)).toEqual([" 마지막 말", "spoken"]);
+  const combined = "카드의 상징을 살펴볼게. 마지막 말";
+  expect(audioMock.appended).toEqual([[combined, "spoken"]]);
+  audioMock.playback("카드의 상징을 살펴볼게.");
+  expect(controller.getSnapshot().caption).toBe("카드의 상징을 살펴볼게.");
+  audioMock.playback("마지막 말", false);
+  expect(controller.getSnapshot().caption).toBe("마지막 말");
   await emit(
     "review_question",
     { question: "오늘 주목할 점?", spreadId: "situation" },
@@ -349,7 +376,6 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
   expect(controller.getSnapshot().session.picks).toEqual([7]);
   expect(controller.getSnapshot().phase).toBe("picking");
   // Continue exclusively through model tool events, with no UI interactions.
-  const caption = controller.getSnapshot().caption;
   await emit("select_numbers", { picks: [22, 51] }, "remaining");
   await emit("confirm_cards", {}, "four");
   await emit("reveal_card", { slot: 1 }, "five");
@@ -389,11 +415,29 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
       type: "input_audio_buffer.speech_started",
       item_id: `feedback-${slot - 1}`,
     });
+    const revealedViews: { phase: string; focus: number[]; caption: string }[] =
+      [];
+    const unsubscribe = controller.subscribe(() => {
+      const view = controller.getSnapshot();
+      if (view.session.revealed.includes(slot))
+        revealedViews.push({
+          phase: view.phase,
+          focus: view.active,
+          caption: view.caption,
+        });
+    });
     await emit("reveal_card", { slot }, `after-feedback-${slot}`);
-    expect(controller.getSnapshot().session.revealed).toContain(slot);
+    unsubscribe();
+    expect(revealedViews).toHaveLength(1);
+    expect(revealedViews[0]).toEqual({
+      phase: "reveal",
+      focus: [slot],
+      caption: "",
+    });
     await emit("show_reading", { slot }, `read-${slot}`);
   }
   audioMock.playback("세 번째 카드 해석.");
+  expect(controller.getSnapshot().caption).toBe("세 번째 카드 해석.");
   expect(
     (await controller.command("show_reading", { slot: 0 })).awaitingUser,
   ).toBe(true);
@@ -404,7 +448,7 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
   await emit("show_reading", { slot: 0 }, "seven");
   expect(controller.getSnapshot().session.summaryVisited).toBe(true);
   expect(controller.getSnapshot().session.revealed).toEqual([1, 2, 3]);
-  expect(controller.getSnapshot().caption).toContain(caption);
+  expect(controller.getSnapshot().caption).toBe("");
   expect(mutations.confirm_cards).toBe(1);
   audioMock.busy = true;
   const reveals = mutations.reveal_card;

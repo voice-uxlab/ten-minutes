@@ -12,9 +12,20 @@ import { StrictMode } from "react";
 import { App } from "./app";
 import { loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
+const speechMock = vi.hoisted(() => ({
+  playCaption: (_text: string, _segmentStarted: boolean) => {
+    void [_text, _segmentStarted];
+  },
+}));
 vi.mock("@/features/consultation/speech.ts", () => ({
   displaySpeech: (text: string) => text,
   SpeechPlayer: class {
+    constructor(
+      _context: unknown,
+      options: { onCaption: typeof speechMock.playCaption },
+    ) {
+      speechMock.playCaption = options.onCaption;
+    }
     async connect() {}
     cancel() {}
     close() {}
@@ -61,6 +72,9 @@ test.each(["responds", "times out"])(
   async (outcome) => {
     vi.useFakeTimers();
     try {
+      if (outcome === "times out") {
+        history.replaceState({}, "", "/?auth_callback=session_issued");
+      }
       let respond: ((response: Response) => void) | undefined;
       let signal: AbortSignal | null | undefined;
       vi.mocked(fetch).mockImplementation((_path, options) => {
@@ -86,6 +100,7 @@ test.each(["responds", "times out"])(
       } else {
         await act(() => vi.advanceTimersByTimeAsync(5000));
         expect(signal?.aborted).toBe(true);
+        expect(screen.getByRole("alert").textContent).toContain("LGN-007");
       }
       expect(window.location.pathname).toBe("/login");
       expect(screen.queryByText(notice)).toBeNull();
@@ -102,7 +117,7 @@ test("cancelled social login offers retry", async () => {
   expect((await screen.findByRole("alert")).textContent).toContain(
     "로그인을 취소했어요.",
   );
-  const kakao = screen.getByRole("link", { name: "카카오로 시작하기" });
+  const kakao = screen.getByRole("link", { name: "카카오로 다시 로그인" });
   expect(screen.queryByRole("link", { name: /네이버/ })).toBeNull();
   expect(kakao.getAttribute("href")).toMatch(/\/auth\/kakao\/authorize$/);
   const alert = screen.getByRole("alert");
@@ -111,6 +126,54 @@ test("cancelled social login offers retry", async () => {
   await waitFor(() => expect(window.location.search).toBe(""));
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
 });
+
+test("failed OAuth initialization displays a support ID and clears the URL", async () => {
+  const requestId = `req_${"a".repeat(32)}`;
+  history.replaceState({}, "", `/login?auth_error=failed&auth_request_id=${requestId}`);
+  render(<App />);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    `LGN-001/${requestId}`,
+  );
+  expect(screen.queryByText(/OAUTH_AUTHORIZE_FAILED/)).toBeNull();
+  await waitFor(() => expect(window.location.search).toBe(""));
+});
+
+test("OAuth return without a recognized session error displays the fallback support ID", async () => {
+  sessionStorage.setItem("voice-tarot:login-attempt", "kakao");
+  render(<App />);
+  await waitFor(() => expect(window.location.pathname).toBe("/login"));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "LGN-005",
+  );
+});
+
+test.each(["LGN-003", "LGN-004"])(
+  "OAuth return displays and copies only %s and its request ID",
+  async (supportCode) => {
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, "writeText");
+    const requestId = `req_${"a".repeat(32)}`;
+    history.replaceState({}, "", "/?auth_callback=session_issued");
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ error: {
+        message: "Authentication is required.",
+        support_code: supportCode,
+        request_id: requestId,
+      } }, { status: 401 }),
+    );
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    const alert = await screen.findByRole("alert");
+    const supportId = `${supportCode}/${requestId}`;
+    expect(alert.textContent).toContain("로그인을 완료하지 못했어요.");
+    expect(alert.textContent).toContain(supportId);
+    expect(alert.textContent).not.toMatch(/세션|쿠키|HTTP|\/api\/|SESSION_COOKIE/);
+    await user.click(screen.getByRole("button", { name: "문의 정보 복사" }));
+    await screen.findByText("문의 ID를 복사했어요.");
+    expect(copy).toHaveBeenCalledExactlyOnceWith(supportId);
+    await waitFor(() => expect(window.location.search).toBe(""));
+  },
+);
 
 test("returning to the login page after leaving for OAuth restores retry", async () => {
   history.replaceState({}, "", "/login");
@@ -123,10 +186,11 @@ test("returning to the login page after leaving for OAuth restores retry", async
   expect(screen.queryByRole("alert")).toBeNull();
   fireEvent(window, new Event("pageshow"));
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("소셜 로그인을 완료할 수 없습니다.");
+  expect(alert.textContent).toContain("로그인을 완료하지 못했어요.");
+  expect(alert.textContent).toContain("LGN-008");
   expect(alert.textContent).toContain("다시 로그인해 주세요.");
   expect(kakao.getAttribute("aria-describedby")).toBe(alert.id);
-  expect(screen.queryByRole("link", { name: /로그인 다시 시도/ })).toBeNull();
+  expect(screen.getByRole("link", { name: "카카오로 다시 로그인" })).toBe(kakao);
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
   cleanup();
   render(<App />);
@@ -163,7 +227,7 @@ test("a logged-in user with older consent is sent to onboarding", async () => {
   expect(location.pathname).toBe("/onboarding");
 });
 
-test("authenticated StrictMode: real call entry, partial picks and same-session reload", async () => {
+test.each(["quick", "slow"])("authenticated StrictMode: card reading with a %s summary", async (summarySpeed) => {
   const user = userEvent.setup();
   const now = Date.now();
   const consultation = {
@@ -175,6 +239,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
     call_ends_at: new Date(now + 600000).toISOString(),
     cards: [],
   };
+  let confirmEnd: ((response: Response) => void) | undefined;
   vi.mocked(fetch).mockImplementation(async (path, options) => {
     if (path === userPath) return Response.json({ nickname: "공주" });
     if (path === consultPath && options?.method === "POST") {
@@ -189,6 +254,13 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
       consultation.status = "CONNECTING";
       return new Response("answer");
     }
+    if (path === `${consultPath}/${consultationId}/end`) {
+      return new Promise((resolve) => {
+        confirmEnd = resolve;
+      });
+    }
+    if (path === `${consultPath}/${consultationId}/report/generate`)
+      return new Response(null, { status: 202 });
     if (path === `${consultPath}/${consultationId}/card-selection`) {
       expect(JSON.parse(String(options?.body))).toMatchObject({
         spread_type: "RELATIONSHIP",
@@ -207,11 +279,28 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
         })),
       });
     }
+    const slot = Number(String(path).match(/\/cards\/([123])\/reveal$/)?.[1]);
+    if (slot) {
+      return Response.json({
+        card: {
+          slot,
+          picked_number: [7, 22, 51][slot - 1],
+          position: ["나", "상대", "관계 흐름"][slot - 1],
+          revealed: true,
+          card_id: [3, 17, 19][slot - 1],
+          name: ["여황제", "별", "태양"][slot - 1],
+          direction: "UPRIGHT",
+          keywords: ["풍요"],
+        },
+      });
+    }
     throw Error(`Unexpected request: ${path}`);
   });
   let receiveRealtime: (message: MessageEvent<string>) => void;
   async function sayCardNumbers(picks: number[]) {
-    const id = `picks-${picks.join("-")}`;
+    await emitTool("select_numbers", { picks }, `picks-${picks.join("-")}`);
+  }
+  async function emitTool(name: string, args: object, id: string) {
     await act(async () => {
       for (const event of [
         { type: "response.created", response: { id } },
@@ -222,8 +311,8 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
             output: [
               {
                 type: "function_call",
-                name: "select_numbers",
-                arguments: JSON.stringify({ picks }),
+                name,
+                arguments: JSON.stringify(args),
                 call_id: id,
               },
             ],
@@ -262,7 +351,24 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
         readyState: "open",
         onopen: () => {},
         onmessage: vi.fn<(event: MessageEvent<string>) => void>(),
-        send: () => {},
+        send(message: string) {
+          const request = JSON.parse(message);
+          const metadata = request.response?.metadata;
+          if (
+            request.type !== "response.create" || metadata?.purpose !== "report"
+          )
+            return;
+          queueMicrotask(() =>
+            receiveRealtime(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  type: "response.done",
+                  response: { id: metadata.request_id, status: "completed", metadata },
+                }),
+              }),
+            ),
+          );
+        },
         close: () => {},
       };
       addTrack() {}
@@ -292,11 +398,20 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   await user.click(
     await screen.findByRole("button", { name: /그 사람도 나를 좋아할까/ }),
   );
-  await user.click(await screen.findByText("응, 이 질문으로 볼래"));
+  const confirmQuestion = await screen.findByText("응, 이 질문으로 볼래");
+  const mic = screen.getByRole("button", { name: "마이크 음소거" });
+  const pickingHeading = /마음이 가는\s+번호 세 개를 골라줘/;
+  await user.click(confirmQuestion);
+  expect(confirmQuestion.isConnected).toBe(true);
+  expect(screen.queryByRole("heading", { name: pickingHeading })).toBeNull();
+  const picking = await screen.findByRole("heading", { name: pickingHeading });
+  expect(confirmQuestion.isConnected).toBe(false);
+  expect(screen.getByRole("button", { name: "마이크 음소거" })).toBe(mic);
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(0);
   expect(screen.queryByText("직접 번호 고르기")).toBeNull();
   await sayCardNumbers([7, 22]);
   await screen.findByText(/1개만 더/);
+  expect(screen.getByRole("heading", { name: /1개만 더/ })).toBe(picking);
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(2);
   const reading = loadSession(consultationId)!;
   expect(reading.demo).toBe(false);
@@ -318,6 +433,62 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   await sayCardNumbers([51]);
   await user.click(await screen.findByText("응, 이 3장을 열어줘"));
   await screen.findByRole("heading", { name: /공주가 고른 카드를/ });
+  await emitTool("reveal_card", { slot: 1 }, "reveal-first");
+  const card = screen.getByRole("img", { name: "여황제" });
+  const reader = screen.getByRole("img", { name: "타로 리더 레나" });
+  const heading = screen.getByRole("heading", { name: /첫 번째 카드/ });
+  const message = screen.getByText("카드 해석을 준비하고 있어.");
+  expect(card.closest(".call-page")?.getAttribute("data-phase")).toBe("reading");
+  await emitTool("show_reading", { slot: 1 }, "read-first");
+  expect(screen.getByRole("img", { name: "여황제" })).toBe(card);
+  expect(screen.getByRole("img", { name: "타로 리더 레나" })).toBe(reader);
+  expect(screen.getByRole("heading", { name: /첫 번째 카드/ })).toBe(heading);
+  expect(screen.getByText("카드 해석을 준비하고 있어.")).toBe(message);
+  expect(screen.queryByText("네 이야기를 듣고 있어.")).toBeNull();
+  for (const slot of [1, 2, 3]) {
+    await act(async () => {
+      speechMock.playCaption(`${slot}번 카드의 해석.`, true);
+      receiveRealtime(new MessageEvent("message", {
+        data: JSON.stringify({ type: "input_audio_buffer.speech_started" }),
+      }));
+    });
+    if (slot < 3) {
+      await emitTool("reveal_card", { slot: slot + 1 }, `reveal-${slot + 1}`);
+      await emitTool("show_reading", { slot: slot + 1 }, `read-${slot + 1}`);
+    }
+  }
+  await emitTool("show_reading", { slot: 0 }, "read-summary");
+  const summaryHeading = /세 장의 카드를\s+함께 살펴볼게/;
+  expect(screen.queryByRole("heading", { name: summaryHeading })).toBeNull();
+  if (summarySpeed === "slow") {
+    await screen.findByText("카드 해석을 하고 있어.");
+    expect(screen.queryByRole("heading", { name: summaryHeading })).toBeNull();
+  } else {
+    expect(screen.queryByText("카드 해석을 하고 있어.")).toBeNull();
+  }
+  await act(async () => speechMock.playCaption("세 장의 공통점은 이거야.", true));
+  await screen.findByRole("heading", { name: summaryHeading });
+  expect(screen.getByText("세 장의 공통점은 이거야.")).toBeTruthy();
+  expect(screen.queryByText("카드 해석을 하고 있어.")).toBeNull();
+  if (summarySpeed === "quick") {
+    const call = screen.getByRole("heading", { name: summaryHeading });
+    const endingHeading = "이야기 나눠줘서 고마워.";
+    await user.click(screen.getByRole("button", { name: "통화 종료" }));
+    expect(call.isConnected).toBe(true);
+    expect(screen.queryByRole("heading", { name: endingHeading })).toBeNull();
+    const ended = await screen.findByRole("heading", { name: endingHeading });
+    expect(call.isConnected).toBe(false);
+    expect(
+      screen.getByRole("link", { name: "리포트 정리 중…" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    await waitFor(() => expect(confirmEnd).toBeDefined());
+    await act(async () => {
+      consultation.status = "ENDED";
+      confirmEnd?.(Response.json({ ...consultation, report_status: "PENDING" }));
+    });
+    await screen.findByRole("link", { name: "오늘의 리포트 보기" });
+    expect(screen.getByRole("heading", { name: endingHeading })).toBe(ended);
+  }
   expect(
     vi
       .mocked(fetch)

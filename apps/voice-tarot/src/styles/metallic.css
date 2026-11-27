@@ -21,9 +21,13 @@
 }
 #phone::before {
   z-index: -2;
-  background: #202022 url("/assets/metallic/background.png") no-repeat;
-  background-size: max(470px, 120.51%) auto;
+  --background-width: 470px;
+  background: url("/assets/metallic/background.png") repeat-y;
+  background-size: var(--background-width) auto;
   background-position: calc(50% + 11px) -29px;
+  /* Fade the padding between tiles as the page grows. */
+  mask: linear-gradient(transparent 3%, #000 12% 80%, transparent 93%) 0 -29px /
+    100% calc(var(--background-width) * 2) repeat-y;
 }
 #phone::after {
   content: "";
@@ -36,16 +40,8 @@
 #phone:has(.landing)::after {
   display: none;
 }
-#phone:has(.landing)::before {
+#phone:has(.landing) {
   background-color: #4d4c4e;
-}
-#phone:has(.report-page)::before {
-  --report-background-width: 470px;
-  background-size: var(--report-background-width) auto;
-  background-repeat: repeat-y;
-  /* Blend across the padding in the source image, which is twice as tall as it is wide. */
-  mask: linear-gradient(transparent 3%, #000 12% 80%, transparent 93%) 0 -29px /
-    100% calc(var(--report-background-width) * 2) repeat-y;
 }
 .metallic-page,
 .landing {
@@ -424,6 +420,18 @@
   line-height: 20px;
   color: #ddd;
 }
+.login-recovery-message {
+  display: grid;
+  gap: 3px;
+}
+.login-recovery-message code {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.login-recovery > .text-button {
+  justify-self: start;
+  min-height: 44px;
+}
 .question-progress [data-current="true"] {
   color: var(--pink);
   font-weight: 500;
@@ -435,6 +443,18 @@
 .phase-content {
   display: grid;
   gap: 12px;
+}
+.call-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+.call-body[data-summary-pending="true"] {
+  min-block-size: 28rem;
+}
+.summary-wait {
+  margin-block: auto;
+  text-align: center;
 }
 .phase-content .slots {
   margin: 8px 0 12px;
@@ -504,23 +524,23 @@
   font-size: 13px;
   line-height: 19px;
 }
-.call-page:is([data-phase="listening"], [data-phase="question"]) h1 {
+.call-body:is([data-content-phase="listening"], [data-content-phase="question"]) h1 {
   line-height: 32px;
 }
-.call-page[data-phase="summary"] h1 {
+.call-body[data-content-phase="summary"] h1 {
   margin-top: 16px;
 }
-.call-page[data-phase="question"] .phase-content > .panel {
+.call-body[data-content-phase="question"] .phase-content > .panel {
   min-height: 192px;
   margin-top: 7px;
 }
-.call-page[data-phase="question"] .panel-body > b,
+.call-body[data-content-phase="question"] .panel-body > b,
 .ended-page .panel-body h2 {
   font-size: 21px;
   line-height: 30px;
   letter-spacing: -0.02em;
 }
-.call-page[data-phase="question"] .panel-body > p,
+.call-body[data-content-phase="question"] .panel-body > p,
 .call-page .reading-message .panel-body > p,
 .ended-page .panel-body p {
   letter-spacing: -0.02em;
@@ -529,7 +549,7 @@
 .recovery-page .panel-body p {
   line-height: 23px;
 }
-.call-page[data-phase="question"] .phase-content > .wide:nth-child(2) {
+.call-body[data-content-phase="question"] .phase-content > .wide:nth-child(2) {
   margin-top: 9px;
 }
 .call-page .phase-content > .reading-message {
@@ -538,7 +558,7 @@
 .call-page[data-phase="reveal"] .phase-content > .reading-message {
   min-height: 144px;
 }
-.call-page[data-phase="summary"] .phase-content > .reading-message {
+.call-body[data-content-phase="summary"] .phase-content > .reading-message {
   min-height: 168px;
 }
 .metallic-page .slots[data-focused="true"] > .card-wrap {
@@ -567,11 +587,24 @@
   font-size: 11px;
   line-height: 16px;
 }
-.tarot-card-face {
-  display: grid;
-  place-items: center;
+.tarot-card-visual {
+  position: relative;
   aspect-ratio: 104 / 174;
   width: 100%;
+  perspective: 560px;
+}
+.tarot-card-flip {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+.tarot-card-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 .tarot-card-face img {
   display: block;
@@ -580,7 +613,7 @@
   min-height: 0;
   object-fit: contain;
 }
-.tarot-card-face .tarot-card-back {
+.tarot-card-back {
   transform: rotateY(180deg);
 }
 .tarot-card-face .tarot-card-reversed {
@@ -829,4 +862,27 @@
 .invite-page .panel-body p {
   line-height: 22.5px;
   letter-spacing: -0.02em;
+}
+
+.loading-page .loading-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+}
+.loading-wave {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-end: 0.5em;
+  vertical-align: middle;
+}
+.loading-wave img {
+  width: 28px;
+  height: auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .loading-wave img {
+    animation: wave-pulse 1.2s infinite ease-in-out;
+  }
 }

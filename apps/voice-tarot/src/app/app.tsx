@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/api/client";
 import { Home, Onboarding } from "@/pages/home";
+import { LoadingPage } from "@/components/tarot";
 import { lazy, Suspense } from "react";
 const SessionPage = lazy(() =>
   import("@/pages/session").then((m) => ({ default: m.SessionPage })),
@@ -22,9 +23,7 @@ export function App() {
         <main id="phone" className="safe-bottom">
           <Suspense
             fallback={
-              <section className="page" role="status">
-                화면을 준비하고 있어요.
-              </section>
+              <LoadingPage message="화면을 준비하고 있어요." />
             }
           >
             <Routes>

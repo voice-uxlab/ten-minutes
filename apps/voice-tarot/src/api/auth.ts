@@ -1,5 +1,5 @@
 import type { QueryFunctionContext } from "@tanstack/react-query";
-import { apiOrigin, fetchApi } from "./client";
+import { apiOrigin, FastApiError, fetchApi } from "./client";
 
 const userPath = "/api/v1/users/me";
 export const consentVersion = import.meta.env.VITE_AUTH_CONSENT_VERSION?.trim();
@@ -22,18 +22,52 @@ type AuthUser = Pick<
   "nickname" | "onboarding_required" | "provider"
 >;
 
+export function loginRequestId(value: unknown): string | undefined {
+  return typeof value === "string" && /^req_[a-f0-9]{32}$/.test(value)
+    ? value
+    : undefined;
+}
+
+export class AuthLookupError extends FastApiError {
+  constructor(
+    status: number,
+    readonly supportCode: "LGN-003" | "LGN-004" | "LGN-005" | "LGN-006",
+    readonly requestId?: string,
+  ) {
+    super("로그인 상태를 확인하지 못했어요.", status);
+  }
+}
+
+export class AuthSessionError extends AuthLookupError {
+  constructor(supportCode: "LGN-003" | "LGN-004" | "LGN-005", requestId?: string) {
+    super(401, supportCode, requestId);
+  }
+}
+
 export function authorizeUrl() {
   return `${apiOrigin}/auth/kakao/authorize`;
 }
 
 export const authOptions = {
   queryKey: ["auth"],
+  retry: (failureCount: number, error: Error) =>
+    !(error instanceof AuthSessionError) && failureCount < 1,
   queryFn: async ({
     signal,
   }: QueryFunctionContext): Promise<AuthUser | null> => {
     const response = await fetchApi(userPath, { signal });
-    if (response.status === 401) return null;
-    if (!response.ok) throw new Error("로그인 상태를 확인하지 못했어요.");
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const requestId = loginRequestId(body?.error?.request_id);
+      if (response.status === 401) {
+        const code = body?.error?.support_code;
+        throw new AuthSessionError(
+          code === "LGN-003" || code === "LGN-004" ? code : "LGN-005",
+          requestId,
+        );
+      }
+      throw new AuthLookupError(response.status, "LGN-006", requestId);
+    }
     const member: MemberProfile = await response.json();
     return {
       ...member,

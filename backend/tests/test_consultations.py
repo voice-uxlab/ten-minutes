@@ -282,6 +282,7 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(
 ):
     from fastapi.testclient import TestClient
     from sqlalchemy.exc import OperationalError
+    from urllib.parse import parse_qs, urlsplit
 
     from app.config import Settings, get_settings
     from app.main import app
@@ -304,7 +305,11 @@ def test_oauth_authorize_redirects_to_frontend_when_database_fails(
         app.dependency_overrides.pop(get_settings, None)
 
     assert response.status_code == 302
-    assert response.headers["location"] == "https://web.example.com/login?auth_error=failed"
+    location = urlsplit(response.headers["location"])
+    assert (location.scheme, location.netloc, location.path) == ("https", "web.example.com", "/login")
+    assert parse_qs(location.query) == {
+        "auth_error": ["failed"], "auth_request_id": [response.headers["x-request-id"]],
+    }
     assert "database_error_category=unclassified" in caplog.text
     assert "dbapi_exception_type=RuntimeError" in caplog.text
 
@@ -523,6 +528,7 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
         monkeypatch.setattr(settings, field, value)
     calls = []
     tts = []
+    timestamp_stream = b'{"audio":"d2F2LXRlc3Q=","words":[{"text":"test","start":0,"end":1}]}\n'
     def provider_response(self, url, **kwargs):
         calls.append((url, kwargs))
         if url.endswith("/hangup"):
@@ -533,7 +539,9 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
         )
 
     async def tts_response(self, request, **kwargs):
-        tts.append(json.loads(request.content))
+        tts.append((str(request.url), json.loads(request.content)))
+        if request.url.path.endswith("/with-timestamps"):
+            return httpx.Response(200, content=timestamp_stream, headers={"content-type": "application/x-ndjson"})
         return httpx.Response(200, content=b"wav-test", headers={"content-type": "audio/wav"})
 
     monkeypatch.setattr(httpx.Client, "post", provider_response)
@@ -573,8 +581,12 @@ def test_voice_connection_and_typecast_limits(authenticated_client, db_session, 
 
     audio = client.request("POST", f"{path}/tts/stream", json=speech)
     assert audio.status_code == 200 and audio.content == b"wav-test"
-    assert tts[0]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
-    assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 200
+    assert tts[0][0] == "https://api.typecast.ai/v1/text-to-speech/stream"
+    assert tts[0][1]["output"] == {"audio_format": "wav", "audio_tempo": 1.3, "audio_pitch": 0}
+    timed_audio = client.request("POST", f"{path}/tts/stream?timestamps=true", json=speech)
+    assert timed_audio.status_code == 200 and timed_audio.content == timestamp_stream
+    assert timed_audio.headers["content-type"] == "application/x-ndjson"
+    assert tts[1] == ("https://api.typecast.ai/v1/text-to-speech/stream/with-timestamps?granularity=word", tts[0][1])
     assert client.request("POST", f"{path}/tts/stream", json=speech).status_code == 429
     assert len(tts) == 2
 
@@ -672,7 +684,7 @@ def test_deadline_caps_heartbeat_and_rejects_reconnect_but_allows_hangup_retry(a
     assert provider.call_args.args[0].endswith("/rtc_local/hangup")
 
 
-def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch):
+def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch, caplog):
     from datetime import datetime, timedelta, timezone
     from urllib.parse import parse_qs, urlsplit
 
@@ -699,10 +711,35 @@ def test_oauth_only_accepts_callback_from_login_browser(db_session, monkeypatch)
         assert "HttpOnly" in start.headers["set-cookie"] and "SameSite=lax" in start.headers["set-cookie"]
         path = f"/auth/{provider}/callback"
         params = {"state": state, "code": "test-code"}
-        assert other.get(path, params=params, follow_redirects=False).status_code == 400
+        missing_attempt = other.get(path, params=params, follow_redirects=False)
+        assert missing_attempt.status_code == 400
+        assert missing_attempt.json()["error"]["message"] == "The OAuth state is invalid or has expired."
         cookie_name = auth.oauth_cookie_name(provider, settings)
         binding = browser.cookies.get(cookie_name)
-        assert browser.get(path, params=params, follow_redirects=False).status_code == 302
+        callback = browser.get(path, params=params, follow_redirects=False)
+        assert callback.status_code == 302
+        assert urlsplit(callback.headers["location"]).query == "auth_callback=session_issued"
+        assert settings.session_cookie_name in callback.cookies
+        missing_session = other.get("/api/v1/users/me")
+        assert missing_session.status_code == 401
+        assert missing_session.json()["error"] == {
+            "code": "AUTHENTICATION_REQUIRED",
+            "message": "Authentication is required.",
+            "support_code": "LGN-003",
+            "request_id": missing_session.headers["x-request-id"],
+        }
+        other.cookies.set(settings.session_cookie_name, "unknown-session")
+        rejected_session = other.get("/api/v1/users/me")
+        assert rejected_session.status_code == 401
+        assert rejected_session.json()["error"] == {
+            "code": "AUTHENTICATION_REQUIRED",
+            "message": "Authentication is required.",
+            "support_code": "LGN-004",
+            "request_id": rejected_session.headers["x-request-id"],
+        }
+        for response, support_code in ((missing_session, "LGN-003"), (rejected_session, "LGN-004")):
+            assert any(response.headers["x-request-id"] in record.message and support_code in record.message
+                       for record in caplog.records)
         assert browser.get("/api/v1/users/me").status_code == 200
         browser.cookies.set(cookie_name, binding)
         assert browser.get(path, params=params, follow_redirects=False).status_code == 400

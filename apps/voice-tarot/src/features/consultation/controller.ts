@@ -156,7 +156,6 @@ export class Consultation {
   private interrupted = false;
   private responseId = "";
   private responseContext?: NoteContext;
-  private caption = "";
   private realtimeSpeechBuffer = "";
   private stopped = false;
   private warned = false;
@@ -278,9 +277,38 @@ export class Consultation {
         const s = this.view.session;
         const result = await consultationCommand(s, action, args);
         if (this.stopped) return { error: "종료된 통화예요." };
-        if (!result.error && !result.unchanged) recordFlow(s, action, args);
+        let patch: Partial<View> = {};
+        if (!result.error && !result.unchanged) {
+          recordFlow(s, action, args);
+          if (action === "reveal_card") {
+            const slot = Number(args.slot);
+            patch = {
+              phase: "reveal",
+              heading: `${slot}번째 카드는,\n${result.name}이야.`,
+              hint: `${s.revealed.length} / ${s.cards.length} 카드 공개`,
+              active: [slot],
+              caption: "",
+              status: "레나가 생각하는 중",
+            };
+          } else if (action === "show_reading") {
+            const slots = result.context?.focusSlots || [];
+            patch = {
+              phase: "reading",
+              heading: slots.length
+                ? `${slots.map((n) => s.cards[n - 1].name).join(" · ")},\n함께 연결해볼게.`
+                : "결정의 주인공은\n언제나 공주야.",
+              hint: slots.length
+                ? slots.map((n) => s.positions[n - 1]).join(" / ")
+                : `${s.cards.length}장 종합 리딩`,
+              active: slots,
+              ...(slots.length
+                ? {}
+                : { caption: "", status: "레나가 생각하는 중" }),
+            };
+          }
+        }
+        this.update(patch);
         this.persist();
-        this.update();
         return result;
       });
     this.queue = task;
@@ -363,28 +391,6 @@ export class Consultation {
           `${s.revealed.length} / ${s.cards.length} 카드 공개`,
         );
         break;
-      case "reveal_card":
-        this.show(
-          "reveal",
-          `${args.slot}번째 카드는,\n${r.name}이야.`,
-          `${s.revealed.length} / ${s.cards.length} 카드 공개`,
-        );
-        this.update({ active: [Number(args.slot)] });
-        break;
-      case "show_reading": {
-        const slots = r.context?.focusSlots || [];
-        this.show(
-          "reading",
-          slots.length
-            ? `${slots.map((n) => s.cards[n - 1].name).join(" · ")},\n함께 연결해볼게.`
-            : "결정의 주인공은\n언제나 공주야.",
-          slots.length
-            ? slots.map((n) => s.positions[n - 1]).join(" / ")
-            : `${s.cards.length}장 종합 리딩`,
-        );
-        this.update({ active: slots });
-        break;
-      }
     }
     return r;
   }
@@ -468,14 +474,19 @@ export class Consultation {
             });
         },
         onError: (error: Error) => this.failMessage(error),
-        onPlaybackStart: (text: string) => {
+        onCaption: (text, segmentStarted) => {
+          if (this.stopped) return;
+          if (!segmentStarted) {
+            this.update({ caption: text });
+            return;
+          }
           if (this.view.phase === "reading" && this.view.active.length === 1)
             this.readingPlaybackSlot = this.view.active[0];
-          if (this.stopped) return;
           this.update({
-            caption: (this.view.caption + displaySpeech(text)).slice(-600),
+            caption: text,
+            audioPlaying: true,
+            status: "레나가 말하는 중",
           });
-          this.update({ audioPlaying: true, status: "레나가 말하는 중" });
         },
       });
       if (stale()) return;
@@ -578,7 +589,6 @@ export class Consultation {
       if (this.responses.has(r.id)) return;
       this.responses.add(r.id);
       this.responseContext = noteContext(s);
-      this.caption = "";
       this.realtimeSpeechBuffer = "";
       this.responseId = r.id;
       this.responding = true;
@@ -588,20 +598,22 @@ export class Consultation {
     const current =
       e.response_id === this.responseId && !this.interrupted && !this.stopped;
     if (e.type === "response.output_text.delta" && current) {
-      this.caption += e.delta || "";
       this.realtimeSpeechBuffer += e.delta || "";
-      let boundary: RegExpMatchArray | null;
-      while (
-        (boundary = this.realtimeSpeechBuffer.match(
-          /[.!?。！？]+(?:[”’"'])?(?=\s|$)/,
-        ))
-      ) {
-        const end = boundary.index! + boundary[0].length;
-        const sentence = this.realtimeSpeechBuffer.slice(0, end);
-        this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(end);
-        if (/[\p{L}\p{N}]/u.test(sentence)) {
-          this.speech?.append(sentence, this.responseId);
+      // Batch short sentences from one reply before sending them to Typecast.
+      const targetLength = 100;
+      if (this.realtimeSpeechBuffer.length >= targetLength) {
+        let consumed = 0;
+        for (const boundary of this.realtimeSpeechBuffer.matchAll(
+          /[.!?。！？]+(?:[”’"'])?(?=\s|$)/g,
+        )) {
+          const end = boundary.index + boundary[0].length;
+          if (end - consumed < targetLength) continue;
+          const segment = this.realtimeSpeechBuffer.slice(consumed, end);
+          if (/[\p{L}\p{N}]/u.test(segment))
+            this.speech?.append(segment, this.responseId);
+          consumed = end;
         }
+        this.realtimeSpeechBuffer = this.realtimeSpeechBuffer.slice(consumed);
       }
     }
     if (e.type === "response.output_text.done" && current) {
@@ -644,6 +656,13 @@ export class Consultation {
       this.pending = false;
       if (this.responding) this.send({ type: "response.cancel" });
       this.update({ status: "공주 얘기 듣는 중" });
+    }
+    if (
+      e.type === "input_audio_buffer.speech_stopped" &&
+      this.view.phase === "picking" &&
+      !this.stopped
+    ) {
+      this.update({ status: "말해준 번호를 확인하는 중" });
     }
     if (e.type === "response.done" && r) {
       if (this.completed.has(r.id)) return;
