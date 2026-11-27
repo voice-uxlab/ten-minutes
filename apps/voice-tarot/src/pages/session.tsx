@@ -216,7 +216,13 @@ function Call({ initial }: { initial: Session }) {
       : undefined;
   const summary = v.phase === "reading" && s.summaryVisited && !focused;
   const retry = selecting && v.retryNumbers;
-  const phase = retry ? "retry-numbers" : summary ? "summary" : v.phase;
+  const phase = retry
+    ? "retry-numbers"
+    : summary
+      ? "summary"
+      : focused
+        ? "reading"
+        : v.phase;
   const timer =
     v.phase === "connecting"
       ? "연결 중"
@@ -231,11 +237,9 @@ function Call({ initial }: { initial: Session }) {
         ? "이 질문으로\n살펴볼까?"
         : v.phase === "picking" && !s.picks.length && count === 3
           ? "마음이 가는\n번호 세 개를 골라줘."
-          : ordinal && v.phase === "reveal"
-            ? `${ordinal} 카드는,\n${focused.name}이야.`
-            : ordinal && v.phase === "reading"
-              ? `${ordinal} 카드,\n언니가 이야기해줄게.`
-              : v.heading;
+          : ordinal
+            ? `${ordinal} 카드,\n언니가 이야기해줄게.`
+            : v.heading;
   return (
     <section className="page metallic-page call-page" data-phase={phase}>
       <BrandHeader>
@@ -245,24 +249,20 @@ function Call({ initial }: { initial: Session }) {
           ● {timer}
         </span>
       </BrandHeader>
-      {v.phase === "reveal" && focused ? (
-        <p className="eyebrow">
-          PICKED BY PRINCESS / {focused.slot} OF {s.cards.length}
-        </p>
-      ) : (
-        !summary && (
-          <Reader
-            active={[
-              "listening",
-              "question",
-              "picking",
-              "confirm",
-              "reading",
-            ].includes(v.phase)}
-            loading={v.status === "레나가 생각하는 중" || v.status === "말해준 번호를 확인하는 중"}
-            status={v.status}
-          />
-        )
+      {!summary && (
+        <Reader
+          active={
+            !!focused ||
+            ["listening", "question", "picking", "confirm", "reading"].includes(
+              v.phase,
+            )
+          }
+          loading={
+            v.status === "레나가 생각하는 중" ||
+            v.status === "말해준 번호를 확인하는 중"
+          }
+          status={v.status}
+        />
       )}
       <h1>{heading}</h1>
       {["listening", "question"].includes(v.phase) && (
@@ -276,8 +276,7 @@ function Call({ initial }: { initial: Session }) {
         <p className="hint">번호 다시 듣기 · 천천히 말해줘</p>
       ) : focused ? (
         <p className="hint">
-          {focused.slot} / {s.cards.length} · {focused.position}
-          {v.phase === "reading" ? ` · ${focused.name}` : ""}
+          {focused.slot} / {s.cards.length} · {focused.position} · {focused.name}
         </p>
       ) : (
         v.phase !== "question" &&
@@ -408,10 +407,8 @@ function Call({ initial }: { initial: Session }) {
               <Panel title="MESSAGE" className="reading-message">
                 <p aria-live="polite">
                   {v.caption ||
-                    (v.phase === "reveal" && focused
-                      ? focused.reversed
-                        ? focused.reverse
-                        : focused.upright
+                    (focused
+                      ? "카드 해석을 준비하고 있어."
                       : "네 이야기를 듣고 있어.")}
                 </p>
               </Panel>

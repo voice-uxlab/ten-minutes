@@ -277,9 +277,35 @@ export class Consultation {
         const s = this.view.session;
         const result = await consultationCommand(s, action, args);
         if (this.stopped) return { error: "종료된 통화예요." };
-        if (!result.error && !result.unchanged) recordFlow(s, action, args);
+        let patch: Partial<View> = {};
+        if (!result.error && !result.unchanged) {
+          recordFlow(s, action, args);
+          if (action === "reveal_card") {
+            const slot = Number(args.slot);
+            patch = {
+              phase: "reveal",
+              heading: `${slot}번째 카드는,\n${result.name}이야.`,
+              hint: `${s.revealed.length} / ${s.cards.length} 카드 공개`,
+              active: [slot],
+              caption: "",
+              status: "레나가 생각하는 중",
+            };
+          } else if (action === "show_reading") {
+            const slots = result.context?.focusSlots || [];
+            patch = {
+              phase: "reading",
+              heading: slots.length
+                ? `${slots.map((n) => s.cards[n - 1].name).join(" · ")},\n함께 연결해볼게.`
+                : "결정의 주인공은\n언제나 공주야.",
+              hint: slots.length
+                ? slots.map((n) => s.positions[n - 1]).join(" / ")
+                : `${s.cards.length}장 종합 리딩`,
+              active: slots,
+            };
+          }
+        }
+        this.update(patch);
         this.persist();
-        this.update();
         return result;
       });
     this.queue = task;
@@ -362,28 +388,6 @@ export class Consultation {
           `${s.revealed.length} / ${s.cards.length} 카드 공개`,
         );
         break;
-      case "reveal_card":
-        this.show(
-          "reveal",
-          `${args.slot}번째 카드는,\n${r.name}이야.`,
-          `${s.revealed.length} / ${s.cards.length} 카드 공개`,
-        );
-        this.update({ active: [Number(args.slot)] });
-        break;
-      case "show_reading": {
-        const slots = r.context?.focusSlots || [];
-        this.show(
-          "reading",
-          slots.length
-            ? `${slots.map((n) => s.cards[n - 1].name).join(" · ")},\n함께 연결해볼게.`
-            : "결정의 주인공은\n언제나 공주야.",
-          slots.length
-            ? slots.map((n) => s.positions[n - 1]).join(" / ")
-            : `${s.cards.length}장 종합 리딩`,
-        );
-        this.update({ active: slots });
-        break;
-      }
     }
     return r;
   }

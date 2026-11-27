@@ -246,11 +246,27 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
         })),
       });
     }
+    if (path === `${consultPath}/${consultationId}/cards/1/reveal`) {
+      return Response.json({
+        card: {
+          slot: 1,
+          picked_number: 7,
+          position: "나",
+          revealed: true,
+          card_id: 3,
+          name: "여황제",
+          direction: "UPRIGHT",
+          keywords: ["풍요"],
+        },
+      });
+    }
     throw Error(`Unexpected request: ${path}`);
   });
   let receiveRealtime: (message: MessageEvent<string>) => void;
   async function sayCardNumbers(picks: number[]) {
-    const id = `picks-${picks.join("-")}`;
+    await emitTool("select_numbers", { picks }, `picks-${picks.join("-")}`);
+  }
+  async function emitTool(name: string, args: object, id: string) {
     await act(async () => {
       for (const event of [
         { type: "response.created", response: { id } },
@@ -261,8 +277,8 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
             output: [
               {
                 type: "function_call",
-                name: "select_numbers",
-                arguments: JSON.stringify({ picks }),
+                name,
+                arguments: JSON.stringify(args),
                 call_id: id,
               },
             ],
@@ -357,6 +373,18 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   await sayCardNumbers([51]);
   await user.click(await screen.findByText("응, 이 3장을 열어줘"));
   await screen.findByRole("heading", { name: /공주가 고른 카드를/ });
+  await emitTool("reveal_card", { slot: 1 }, "reveal-first");
+  const card = screen.getByRole("img", { name: "여황제" });
+  const reader = screen.getByRole("img", { name: "타로 리더 레나" });
+  const heading = screen.getByRole("heading", { name: /첫 번째 카드/ });
+  const message = screen.getByText("카드 해석을 준비하고 있어.");
+  expect(card.closest(".call-page")?.getAttribute("data-phase")).toBe("reading");
+  await emitTool("show_reading", { slot: 1 }, "read-first");
+  expect(screen.getByRole("img", { name: "여황제" })).toBe(card);
+  expect(screen.getByRole("img", { name: "타로 리더 레나" })).toBe(reader);
+  expect(screen.getByRole("heading", { name: /첫 번째 카드/ })).toBe(heading);
+  expect(screen.getByText("카드 해석을 준비하고 있어.")).toBe(message);
+  expect(screen.queryByText("네 이야기를 듣고 있어.")).toBeNull();
   expect(
     vi
       .mocked(fetch)

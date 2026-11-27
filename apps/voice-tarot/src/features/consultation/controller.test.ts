@@ -415,8 +415,25 @@ test("Realtime duplicate tool events mutate once; FastAPI reconnects using the s
       type: "input_audio_buffer.speech_started",
       item_id: `feedback-${slot - 1}`,
     });
+    const revealedViews: { phase: string; focus: number[]; caption: string }[] =
+      [];
+    const unsubscribe = controller.subscribe(() => {
+      const view = controller.getSnapshot();
+      if (view.session.revealed.includes(slot))
+        revealedViews.push({
+          phase: view.phase,
+          focus: view.active,
+          caption: view.caption,
+        });
+    });
     await emit("reveal_card", { slot }, `after-feedback-${slot}`);
-    expect(controller.getSnapshot().session.revealed).toContain(slot);
+    unsubscribe();
+    expect(revealedViews).toHaveLength(1);
+    expect(revealedViews[0]).toEqual({
+      phase: "reveal",
+      focus: [slot],
+      caption: "",
+    });
     await emit("show_reading", { slot }, `read-${slot}`);
   }
   audioMock.playback("세 번째 카드 해석.");
