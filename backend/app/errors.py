@@ -27,6 +27,7 @@ class APIError(Exception):
     message: str
     upstream_status: Optional[int] = None
     diagnostics: Optional[TTSDiagnostics] = None
+    support_code: Optional[str] = None
 
 
 def error_body(code: str, message: str, request_id: str) -> dict:
@@ -55,10 +56,14 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
         details.append(f"upstream_status={exc.upstream_status}")
     if exc.__cause__:
         details.append(f"cause={type(exc.__cause__).__name__}")
+    if exc.support_code:
+        details.append(f"support_code={exc.support_code}")
     request_id = log_failure(request, exc.status_code, exc.code, " ".join(details))
     body = error_body(exc.code, exc.message, request_id)
     if exc.diagnostics:
         body["error"]["diagnostics"] = exc.diagnostics.model_dump(exclude_none=True)
+    if exc.support_code:
+        body["error"]["support_code"] = exc.support_code
     return JSONResponse(content=body, status_code=exc.status_code)
 
 

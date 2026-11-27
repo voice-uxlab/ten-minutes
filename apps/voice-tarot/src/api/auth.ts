@@ -22,12 +22,25 @@ type AuthUser = Pick<
   "nickname" | "onboarding_required" | "provider"
 >;
 
-export class AuthSessionError extends FastApiError {
+export function loginRequestId(value: unknown): string | undefined {
+  return typeof value === "string" && /^req_[a-f0-9]{32}$/.test(value)
+    ? value
+    : undefined;
+}
+
+export class AuthLookupError extends FastApiError {
   constructor(
-    readonly cookie: "missing" | "rejected" | "unknown",
+    status: number,
+    readonly supportCode: "LGN-003" | "LGN-004" | "LGN-005" | "LGN-006",
     readonly requestId?: string,
   ) {
-    super("로그인 상태를 확인하지 못했어요.", 401);
+    super("로그인 상태를 확인하지 못했어요.", status);
+  }
+}
+
+export class AuthSessionError extends AuthLookupError {
+  constructor(supportCode: "LGN-003" | "LGN-004" | "LGN-005", requestId?: string) {
+    super(401, supportCode, requestId);
   }
 }
 
@@ -43,23 +56,18 @@ export const authOptions = {
     signal,
   }: QueryFunctionContext): Promise<AuthUser | null> => {
     const response = await fetchApi(userPath, { signal });
-    if (response.status === 401) {
+    if (!response.ok) {
       const body = await response.json().catch(() => null);
-      const message = body?.error?.message;
-      const requestId = body?.error?.request_id;
-      throw new AuthSessionError(
-        message === "The session cookie was missing."
-          ? "missing"
-          : message === "The session cookie was rejected."
-            ? "rejected"
-            : "unknown",
-        typeof requestId === "string" && /^req_[a-f0-9]{32}$/.test(requestId)
-          ? requestId
-          : undefined,
-      );
+      const requestId = loginRequestId(body?.error?.request_id);
+      if (response.status === 401) {
+        const code = body?.error?.support_code;
+        throw new AuthSessionError(
+          code === "LGN-003" || code === "LGN-004" ? code : "LGN-005",
+          requestId,
+        );
+      }
+      throw new AuthLookupError(response.status, "LGN-006", requestId);
     }
-    if (!response.ok)
-      throw new FastApiError("로그인 상태를 확인하지 못했어요.", response.status);
     const member: MemberProfile = await response.json();
     return {
       ...member,
