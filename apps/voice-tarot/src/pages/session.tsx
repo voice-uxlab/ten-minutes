@@ -1,5 +1,6 @@
 import { Cards } from "@/components/cards";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { consultationOptions } from "@/api/consultations";
@@ -54,6 +55,28 @@ function Call({ initial }: { initial: Session }) {
     [edit, setEdit] = useState(false),
     [question, setQuestion] = useState(s.question),
     mounted = useRef(false);
+  const reducedMotion = useReducedMotion();
+  const summary = v.phase === "reading" && s.summaryVisited && !v.active.length;
+  const [summaryStage, setSummaryStage] = useState<
+    "pending" | "waiting" | "shown"
+  >("pending");
+  const summaryReady =
+    summary && (!!v.caption || !!v.error || v.status === "공주 얘기 듣는 중");
+  const summaryShown = summaryStage === "shown";
+  const showSummary = summary && (summaryReady || summaryShown);
+  useEffect(() => {
+    if (!summary || summaryShown) return;
+    if (summaryReady) {
+      setSummaryStage("shown");
+      return;
+    }
+    const waiting = setTimeout(() => setSummaryStage("waiting"), 500);
+    const fallback = setTimeout(() => setSummaryStage("shown"), 3500);
+    return () => {
+      clearTimeout(waiting);
+      clearTimeout(fallback);
+    };
+  }, [summary, summaryReady, summaryShown]);
   useEffect(() => {
     mounted.current = true;
     const onHide = () => controller.dispose();
@@ -141,60 +164,71 @@ function Call({ initial }: { initial: Session }) {
         </Button>
       </section>
     );
-  if (["ending", "ended"].includes(v.phase))
-    return (
-      <section className="page metallic-page ended-page" data-phase={v.phase}>
-        <BrandHeader>
-          <span className="timer glass">● 종료</span>
-        </BrandHeader>
-        <Reader status="다음에 또 이야기하자" />
-        <h1>이야기 나눠줘서 고마워.</h1>
-        <p className="hint">통화가 종료되었어요.</p>
-        <Panel title="MESSAGE">
-          <h2>언제든 다시 이야기하자.</h2>
-          <p>
-            {v.phase === "ending"
-              ? "오늘의 이야기를 정리하고 있어."
-              : s.report?.queen_line || "리포트 페이지에서 진행 상태를 확인할 수 있어요."}
-          </p>
-        </Panel>
-        {v.phase === "ending" && v.error && (
-          <>
-            <p role="alert">{v.error}</p>
-            <Button
-              size="wide"
-              disabled={v.busy}
-              onClick={() => void controller.saveReport()}
-            >
-              {v.endUnconfirmed ? "상담 종료 다시 확인" : "리포트 저장 다시 시도"}
-            </Button>
-          </>
-        )}
-        <Button asChild disabled={v.phase === "ending"} size="wide">
-          <Link
-            aria-disabled={v.phase === "ending"}
-            onClick={(e) => {
-              if (v.phase === "ending") e.preventDefault();
-            }}
-            to={`/sessions/${s.readingId}/report`}
+  const fade = {
+    initial: { opacity: 0 },
+    animate: { opacity: 1 },
+    exit: { opacity: 0 },
+    transition: { duration: reducedMotion ? 0 : 0.2 },
+  };
+  const callEnded = v.phase === "ending" || v.phase === "ended";
+  const endedScreen = callEnded && (
+    <motion.section
+      key="ended"
+      className="page metallic-page ended-page"
+      data-phase={v.phase}
+      {...fade}
+    >
+      <BrandHeader>
+        <span className="timer glass">● 종료</span>
+      </BrandHeader>
+      <Reader status="다음에 또 이야기하자" />
+      <h1>이야기 나눠줘서 고마워.</h1>
+      <p className="hint">통화가 종료되었어요.</p>
+      <Panel title="MESSAGE">
+        <h2>언제든 다시 이야기하자.</h2>
+        <p>
+          {v.phase === "ending"
+            ? "오늘의 이야기를 정리하고 있어."
+            : s.report?.queen_line || "리포트 페이지에서 진행 상태를 확인할 수 있어요."}
+        </p>
+      </Panel>
+      {v.phase === "ending" && v.error && (
+        <>
+          <p role="alert">{v.error}</p>
+          <Button
+            size="wide"
+            disabled={v.busy}
+            onClick={() => void controller.saveReport()}
           >
-            {v.phase === "ending" ? "리포트 정리 중…" : "오늘의 리포트 보기"}
-          </Link>
-        </Button>
-        {v.recording ? (
-          <a
-            className="button glass"
-            href={v.recording}
-            download="voice-tarot-recording.webm"
-          >
-            내 목소리 녹음 저장
-          </a>
-        ) : null}
-        <Button asChild size="wide">
-          <Link to="/">타로 다시 보기</Link>
-        </Button>
-      </section>
-    );
+            {v.endUnconfirmed ? "상담 종료 다시 확인" : "리포트 저장 다시 시도"}
+          </Button>
+        </>
+      )}
+      <Button asChild disabled={v.phase === "ending"} size="wide">
+        <Link
+          aria-disabled={v.phase === "ending"}
+          onClick={(e) => {
+            if (v.phase === "ending") e.preventDefault();
+          }}
+          to={`/sessions/${s.readingId}/report`}
+        >
+          {v.phase === "ending" ? "리포트 정리 중…" : "오늘의 리포트 보기"}
+        </Link>
+      </Button>
+      {v.recording ? (
+        <a
+          className="button glass"
+          href={v.recording}
+          download="voice-tarot-recording.webm"
+        >
+          내 목소리 녹음 저장
+        </a>
+      ) : null}
+      <Button asChild size="wide">
+        <Link to="/">타로 다시 보기</Link>
+      </Button>
+    </motion.section>
+  );
   const selecting = ["picking", "confirm"].includes(v.phase),
     count = selectionCount(s),
     cards = selecting
@@ -214,7 +248,6 @@ function Call({ initial }: { initial: Session }) {
     activeCard && ["reveal", "reading"].includes(v.phase)
       ? activeCard
       : undefined;
-  const summary = v.phase === "reading" && s.summaryVisited && !focused;
   const retry = selecting && v.retryNumbers;
   const phase = retry
     ? "retry-numbers"
@@ -223,6 +256,11 @@ function Call({ initial }: { initial: Session }) {
       : focused
         ? "reading"
         : v.phase;
+  const contentKey = summary
+    ? "summary"
+    : selecting || v.phase === "reveal" || v.phase === "reading"
+      ? "cards"
+      : "call";
   const timer =
     v.phase === "connecting"
       ? "연결 중"
@@ -240,15 +278,15 @@ function Call({ initial }: { initial: Session }) {
           : ordinal
             ? `${ordinal} 카드,\n언니가 이야기해줄게.`
             : v.heading;
-  return (
-    <section className="page metallic-page call-page" data-phase={phase}>
-      <BrandHeader>
-        <span
-          className={`timer glass${v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
-        >
-          ● {timer}
-        </span>
-      </BrandHeader>
+  const readingMessage =
+    v.caption ||
+    (summary && !summaryReady
+      ? "카드 해석을 하고 있어."
+      : focused
+        ? "카드 해석을 준비하고 있어."
+        : "네 이야기를 듣고 있어.");
+  const callBody = !callEnded && (
+    <>
       {!summary && (
         <Reader
           active={
@@ -405,12 +443,7 @@ function Call({ initial }: { initial: Session }) {
           {!selecting && v.phase !== "question" && (
             <>
               <Panel title="MESSAGE" className="reading-message">
-                <p aria-live="polite">
-                  {v.caption ||
-                    (focused
-                      ? "카드 해석을 준비하고 있어."
-                      : "네 이야기를 듣고 있어.")}
-                </p>
+                <p aria-live="polite">{readingMessage}</p>
               </Panel>
             </>
           )}
@@ -439,6 +472,46 @@ function Call({ initial }: { initial: Session }) {
           ) : null}
         </div>
       )}
+    </>
+  );
+  const callScreen = !callEnded && (
+    <motion.section
+      key="call"
+      className="page metallic-page call-page"
+      data-phase={phase}
+      {...fade}
+    >
+      <BrandHeader>
+        <span
+          className={`timer glass${v.phase !== "connecting" && v.remaining <= 60 ? " warning" : ""}`}
+        >
+          ● {timer}
+        </span>
+      </BrandHeader>
+      <div className="call-body" data-summary-pending={summary && !showSummary}>
+        <AnimatePresence initial={false} mode="wait">
+          {(!summary || showSummary) && (
+            <motion.div
+              key={contentKey}
+              className="call-body"
+              data-content-phase={phase}
+              {...fade}
+            >
+              {callBody}
+            </motion.div>
+          )}
+          {summary && !showSummary && summaryStage === "waiting" && (
+            <motion.p
+              key="waiting"
+              role="status"
+              className="summary-wait"
+              {...fade}
+            >
+              카드 해석을 하고 있어.
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
       {v.error ? (
         <p role="alert" className="error-message">
           {v.error}
@@ -474,7 +547,7 @@ function Call({ initial }: { initial: Session }) {
           </button>
         </div>
       )}
-      {summary && (
+      {showSummary && (
         <Button
           size="wide"
           disabled={v.busy}
@@ -483,6 +556,11 @@ function Call({ initial }: { initial: Session }) {
           상담 마치고 리포트 보기
         </Button>
       )}
-    </section>
+    </motion.section>
+  );
+  return (
+    <AnimatePresence initial={false} mode="wait">
+      {callEnded ? endedScreen : callScreen}
+    </AnimatePresence>
   );
 }

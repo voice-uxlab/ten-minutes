@@ -12,9 +12,20 @@ import { StrictMode } from "react";
 import { App } from "./app";
 import { loadSession } from "@/lib/storage";
 import { queryClient } from "@/api/client";
+const speechMock = vi.hoisted(() => ({
+  playCaption: (_text: string, _segmentStarted: boolean) => {
+    void [_text, _segmentStarted];
+  },
+}));
 vi.mock("@/features/consultation/speech.ts", () => ({
   displaySpeech: (text: string) => text,
   SpeechPlayer: class {
+    constructor(
+      _context: unknown,
+      options: { onCaption: typeof speechMock.playCaption },
+    ) {
+      speechMock.playCaption = options.onCaption;
+    }
     async connect() {}
     cancel() {}
     close() {}
@@ -202,7 +213,7 @@ test("a logged-in user with older consent is sent to onboarding", async () => {
   expect(location.pathname).toBe("/onboarding");
 });
 
-test("authenticated StrictMode: real call entry, partial picks and same-session reload", async () => {
+test.each(["quick", "slow"])("authenticated StrictMode: card reading with a %s summary", async (summarySpeed) => {
   const user = userEvent.setup();
   const now = Date.now();
   const consultation = {
@@ -214,6 +225,7 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
     call_ends_at: new Date(now + 600000).toISOString(),
     cards: [],
   };
+  let confirmEnd: ((response: Response) => void) | undefined;
   vi.mocked(fetch).mockImplementation(async (path, options) => {
     if (path === userPath) return Response.json({ nickname: "공주" });
     if (path === consultPath && options?.method === "POST") {
@@ -228,6 +240,13 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
       consultation.status = "CONNECTING";
       return new Response("answer");
     }
+    if (path === `${consultPath}/${consultationId}/end`) {
+      return new Promise((resolve) => {
+        confirmEnd = resolve;
+      });
+    }
+    if (path === `${consultPath}/${consultationId}/report/generate`)
+      return new Response(null, { status: 202 });
     if (path === `${consultPath}/${consultationId}/card-selection`) {
       expect(JSON.parse(String(options?.body))).toMatchObject({
         spread_type: "RELATIONSHIP",
@@ -246,15 +265,16 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
         })),
       });
     }
-    if (path === `${consultPath}/${consultationId}/cards/1/reveal`) {
+    const slot = Number(String(path).match(/\/cards\/([123])\/reveal$/)?.[1]);
+    if (slot) {
       return Response.json({
         card: {
-          slot: 1,
-          picked_number: 7,
-          position: "나",
+          slot,
+          picked_number: [7, 22, 51][slot - 1],
+          position: ["나", "상대", "관계 흐름"][slot - 1],
           revealed: true,
-          card_id: 3,
-          name: "여황제",
+          card_id: [3, 17, 19][slot - 1],
+          name: ["여황제", "별", "태양"][slot - 1],
           direction: "UPRIGHT",
           keywords: ["풍요"],
         },
@@ -317,7 +337,24 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
         readyState: "open",
         onopen: () => {},
         onmessage: vi.fn<(event: MessageEvent<string>) => void>(),
-        send: () => {},
+        send(message: string) {
+          const request = JSON.parse(message);
+          const metadata = request.response?.metadata;
+          if (
+            request.type !== "response.create" || metadata?.purpose !== "report"
+          )
+            return;
+          queueMicrotask(() =>
+            receiveRealtime(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  type: "response.done",
+                  response: { id: metadata.request_id, status: "completed", metadata },
+                }),
+              }),
+            ),
+          );
+        },
         close: () => {},
       };
       addTrack() {}
@@ -347,11 +384,20 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   await user.click(
     await screen.findByRole("button", { name: /그 사람도 나를 좋아할까/ }),
   );
-  await user.click(await screen.findByText("응, 이 질문으로 볼래"));
+  const confirmQuestion = await screen.findByText("응, 이 질문으로 볼래");
+  const mic = screen.getByRole("button", { name: "마이크 음소거" });
+  const pickingHeading = /마음이 가는\s+번호 세 개를 골라줘/;
+  await user.click(confirmQuestion);
+  expect(confirmQuestion.isConnected).toBe(true);
+  expect(screen.queryByRole("heading", { name: pickingHeading })).toBeNull();
+  const picking = await screen.findByRole("heading", { name: pickingHeading });
+  expect(confirmQuestion.isConnected).toBe(false);
+  expect(screen.getByRole("button", { name: "마이크 음소거" })).toBe(mic);
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(0);
   expect(screen.queryByText("직접 번호 고르기")).toBeNull();
   await sayCardNumbers([7, 22]);
   await screen.findByText(/1개만 더/);
+  expect(screen.getByRole("heading", { name: /1개만 더/ })).toBe(picking);
   expect(document.querySelectorAll(".card-wrap")).toHaveLength(2);
   const reading = loadSession(consultationId)!;
   expect(reading.demo).toBe(false);
@@ -385,6 +431,50 @@ test("authenticated StrictMode: real call entry, partial picks and same-session 
   expect(screen.getByRole("heading", { name: /첫 번째 카드/ })).toBe(heading);
   expect(screen.getByText("카드 해석을 준비하고 있어.")).toBe(message);
   expect(screen.queryByText("네 이야기를 듣고 있어.")).toBeNull();
+  for (const slot of [1, 2, 3]) {
+    await act(async () => {
+      speechMock.playCaption(`${slot}번 카드의 해석.`, true);
+      receiveRealtime(new MessageEvent("message", {
+        data: JSON.stringify({ type: "input_audio_buffer.speech_started" }),
+      }));
+    });
+    if (slot < 3) {
+      await emitTool("reveal_card", { slot: slot + 1 }, `reveal-${slot + 1}`);
+      await emitTool("show_reading", { slot: slot + 1 }, `read-${slot + 1}`);
+    }
+  }
+  await emitTool("show_reading", { slot: 0 }, "read-summary");
+  const summaryHeading = /세 장의 카드를\s+함께 살펴볼게/;
+  expect(screen.queryByRole("heading", { name: summaryHeading })).toBeNull();
+  if (summarySpeed === "slow") {
+    await screen.findByText("카드 해석을 하고 있어.");
+    expect(screen.queryByRole("heading", { name: summaryHeading })).toBeNull();
+  } else {
+    expect(screen.queryByText("카드 해석을 하고 있어.")).toBeNull();
+  }
+  await act(async () => speechMock.playCaption("세 장의 공통점은 이거야.", true));
+  await screen.findByRole("heading", { name: summaryHeading });
+  expect(screen.getByText("세 장의 공통점은 이거야.")).toBeTruthy();
+  expect(screen.queryByText("카드 해석을 하고 있어.")).toBeNull();
+  if (summarySpeed === "quick") {
+    const call = screen.getByRole("heading", { name: summaryHeading });
+    const endingHeading = "이야기 나눠줘서 고마워.";
+    await user.click(screen.getByRole("button", { name: "통화 종료" }));
+    expect(call.isConnected).toBe(true);
+    expect(screen.queryByRole("heading", { name: endingHeading })).toBeNull();
+    const ended = await screen.findByRole("heading", { name: endingHeading });
+    expect(call.isConnected).toBe(false);
+    expect(
+      screen.getByRole("link", { name: "리포트 정리 중…" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    await waitFor(() => expect(confirmEnd).toBeDefined());
+    await act(async () => {
+      consultation.status = "ENDED";
+      confirmEnd?.(Response.json({ ...consultation, report_status: "PENDING" }));
+    });
+    await screen.findByRole("link", { name: "오늘의 리포트 보기" });
+    expect(screen.getByRole("heading", { name: endingHeading })).toBe(ended);
+  }
   expect(
     vi
       .mocked(fetch)

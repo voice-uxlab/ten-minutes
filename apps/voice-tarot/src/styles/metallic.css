@@ -432,6 +432,18 @@
   display: grid;
   gap: 12px;
 }
+.call-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+.call-body[data-summary-pending="true"] {
+  min-block-size: 28rem;
+}
+.summary-wait {
+  margin-block: auto;
+  text-align: center;
+}
 .phase-content .slots {
   margin: 8px 0 12px;
   min-height: 0;
@@ -500,23 +512,23 @@
   font-size: 13px;
   line-height: 19px;
 }
-.call-page:is([data-phase="listening"], [data-phase="question"]) h1 {
+.call-body:is([data-content-phase="listening"], [data-content-phase="question"]) h1 {
   line-height: 32px;
 }
-.call-page[data-phase="summary"] h1 {
+.call-body[data-content-phase="summary"] h1 {
   margin-top: 16px;
 }
-.call-page[data-phase="question"] .phase-content > .panel {
+.call-body[data-content-phase="question"] .phase-content > .panel {
   min-height: 192px;
   margin-top: 7px;
 }
-.call-page[data-phase="question"] .panel-body > b,
+.call-body[data-content-phase="question"] .panel-body > b,
 .ended-page .panel-body h2 {
   font-size: 21px;
   line-height: 30px;
   letter-spacing: -0.02em;
 }
-.call-page[data-phase="question"] .panel-body > p,
+.call-body[data-content-phase="question"] .panel-body > p,
 .call-page .reading-message .panel-body > p,
 .ended-page .panel-body p {
   letter-spacing: -0.02em;
@@ -525,7 +537,7 @@
 .recovery-page .panel-body p {
   line-height: 23px;
 }
-.call-page[data-phase="question"] .phase-content > .wide:nth-child(2) {
+.call-body[data-content-phase="question"] .phase-content > .wide:nth-child(2) {
   margin-top: 9px;
 }
 .call-page .phase-content > .reading-message {
@@ -534,7 +546,7 @@
 .call-page[data-phase="reveal"] .phase-content > .reading-message {
   min-height: 144px;
 }
-.call-page[data-phase="summary"] .phase-content > .reading-message {
+.call-body[data-content-phase="summary"] .phase-content > .reading-message {
   min-height: 168px;
 }
 .metallic-page .slots[data-focused="true"] > .card-wrap {
@@ -563,11 +575,24 @@
   font-size: 11px;
   line-height: 16px;
 }
-.tarot-card-face {
-  display: grid;
-  place-items: center;
+.tarot-card-visual {
+  position: relative;
   aspect-ratio: 104 / 174;
   width: 100%;
+  perspective: 560px;
+}
+.tarot-card-flip {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+.tarot-card-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 .tarot-card-face img {
   display: block;
@@ -576,7 +601,7 @@
   min-height: 0;
   object-fit: contain;
 }
-.tarot-card-face .tarot-card-back {
+.tarot-card-back {
   transform: rotateY(180deg);
 }
 .tarot-card-face .tarot-card-reversed {
