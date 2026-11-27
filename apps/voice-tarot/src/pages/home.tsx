@@ -11,6 +11,8 @@ import {
   AuthSessionError,
   authOptions,
   authorizeUrl,
+  startGuestSession,
+  leaveGuestSession,
   consentVersion,
   logout,
   saveMemberProfile,
@@ -144,7 +146,18 @@ function Login({
     params.delete("auth_callback");
     navigate({ pathname, search: params.toString(), hash }, { replace: true, state });
   }, [hash, navigate, pathname, search, state]);
+  const guestQueries = useQueryClient();
+  const guest = useMutation({
+    mutationFn: startGuestSession,
+    onSuccess: async () => {
+      sessionStorage.removeItem(loginAttemptKey);
+      guestQueries.clear();
+      await guestQueries.fetchQuery(authOptions);
+      navigate("/", { replace: true });
+    },
+  });
   function startLogin() {
+    leaveGuestSession();
     setRetried(true);
     setSessionIssued(false);
     setAttempt(null);
@@ -167,6 +180,11 @@ function Login({
           카카오로 시작하기
           {recentLogin && <span className="recent-login-label">최근 로그인</span>}
         </a>
+        <Button size="wide" disabled={guest.isPending} onClick={() => guest.mutate()}>
+          {guest.isPending ? "이용권 준비 중…" : "로그인 없이 10분 상담하기"}
+        </Button>
+        <small>비회원 리포트는 이 탭에서만 다시 볼 수 있어요.</small>
+        {guest.error && <p role="alert">{guest.error.message}</p>}
         {showRecovery && (
           <p
             className="login-recovery"
@@ -341,7 +359,7 @@ export function Home() {
     [record, setRecord] = useState(false),
     [error, setError] = useState("");
   const { pathname, search, hash, state } = useLocation();
-  const isLogin = pathname.toLowerCase().replace(/\/+$/, "") === "/login";
+  const isLogin = ["/login", "/guest"].includes(pathname.toLowerCase().replace(/\/+$/, ""));
   const queryClient = useQueryClient();
   const auth = useQuery({ ...authOptions, enabled: !isLogin });
   const hasAuthError = new URLSearchParams(search).has("auth_error");

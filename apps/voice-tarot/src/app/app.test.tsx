@@ -439,3 +439,22 @@ test("report history goes to sign-in for a signed-out visitor", async () => {
   await screen.findByRole("link", { name: "카카오로 시작하기" });
   expect(location.pathname).toBe("/login");
 });
+
+test("guest entry opens onboarding without a session cookie", async () => {
+  history.replaceState({}, "", "/guest");
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (String(url).endsWith("/auth/guest")) {
+      expect(init?.credentials).toBe("omit");
+      return Response.json({ token: "guest_test" });
+    }
+    if (String(url).endsWith(userPath)) {
+      expect(init?.credentials).toBe("omit");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer guest_test");
+      return Response.json({ nickname: null, provider: null, onboarding_required: true });
+    }
+    throw Error("Unexpected request");
+  });
+  render(<App />);
+  await userEvent.click(screen.getByRole("button", { name: "로그인 없이 10분 상담하기" }));
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding"));
+});

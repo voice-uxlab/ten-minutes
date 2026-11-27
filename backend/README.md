@@ -22,8 +22,14 @@ uv run uvicorn app.main:app --reload --port 8000
 
 서버 실행 후 `http://localhost:8000/docs`에서 API별 요청 파라미터, 응답 필드와 상태 코드
 예시를 확인할 수 있습니다. 테스트하려면 API 항목을 펼치고 `Try it out`을 누른 뒤 값을
-입력해 `Execute`를 실행합니다. 인증이 필요한 API는 먼저 같은 브라우저에서 카카오 또는
-카카오 로그인을 완료해야 HttpOnly 세션 쿠키가 자동으로 전달됩니다.
+입력해 `Execute`를 실행합니다. 카카오 로그인은 HttpOnly 세션 쿠키를 사용합니다.
+
+비회원은 웹의 `/guest`에서 10분 상담을 시작할 수 있습니다. `POST /api/v1/auth/guest`로
+발급된 비회원 토큰은 해당 탭의 sessionStorage에 보관하고 API 요청의 Authorization Bearer
+헤더로 전달합니다. 토큰은 24시간 유효하며 로그아웃하면 폐기됩니다. 동의 후 상담을
+만든 시점부터 10분을 계산하고 같은 비회원 세션에서는 한 상담만 생성합니다.
+비로그인 방식이라 새 탭이나 저장소 초기화 후 같은 사람인지 식별할 수 없습니다.
+서버 전체의 UTC 일일 발급 상한은 `GUEST_SESSIONS_PER_DAY`로 설정합니다(기본 100, 0은 발급 중지).
 
 - `400`: OAuth state나 목록 cursor처럼 요청 자체가 올바르지 않음
 - `401`: 서비스 세션이 없거나 만료되어 로그인 필요

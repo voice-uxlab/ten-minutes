@@ -1,5 +1,5 @@
 import type { QueryFunctionContext } from "@tanstack/react-query";
-import { apiOrigin, FastApiError, fetchApi } from "./client";
+import { apiOrigin, FastApiError, fastApi, fetchApi, guestTokenKey } from "./client";
 
 const userPath = "/api/v1/users/me";
 export const consentVersion = import.meta.env.VITE_AUTH_CONSENT_VERSION?.trim();
@@ -29,6 +29,15 @@ export class AuthSessionError extends FastApiError {
   ) {
     super("로그인 상태를 확인하지 못했어요.", 401);
   }
+}
+
+export async function startGuestSession() {
+  const { token } = await fastApi<{token: string | null}>("/api/v1/auth/guest", { method: "POST", credentials: "omit" });
+  if (token) sessionStorage.setItem(guestTokenKey, token);
+}
+
+export function leaveGuestSession() {
+  sessionStorage.removeItem(guestTokenKey);
 }
 
 export function authorizeUrl() {

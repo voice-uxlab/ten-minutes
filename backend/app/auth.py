@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -79,12 +79,19 @@ def provider_credentials(provider: str, settings: Settings) -> tuple[str, Option
     return client_id, client_secret
 
 
+def session_credential(request: Request, settings: Settings) -> Optional[str]:
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer guest_"):
+        return auth[len("Bearer "):]
+    return request.cookies.get(settings.session_cookie_name)
+
+
 def current_user_optional(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Optional[User]:
-    raw = request.cookies.get(settings.session_cookie_name)
+    raw = session_credential(request, settings)
     if not raw:
         return None
     service_session = db.scalar(
@@ -114,6 +121,35 @@ def current_user(
             )
         raise APIError(401, "AUTHENTICATION_REQUIRED", message)
     return user
+
+
+@router.post("/api/v1/auth/guest", summary="Start a guest session for one ten-minute consultation")
+def start_guest(
+    response: Response,
+    user: Optional[User] = Depends(current_user_optional),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    response.headers["Cache-Control"] = "no-store"
+    if user:
+        return {"token": None}
+    now = datetime.now(timezone.utc)
+    # Serialize the shared daily allocation across serverless instances.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("select pg_advisory_xact_lock(94577301)"))
+    issued = db.scalar(select(func.count(User.id)).where(
+        User.role == "GUEST", User.created_at >= now.replace(hour=0, minute=0, second=0, microsecond=0),
+    ))
+    if issued >= settings.guest_sessions_per_day:
+        raise APIError(429, "GUEST_LIMIT", "오늘의 비회원 이용권이 모두 소진됐어요.")
+    guest = User(role="GUEST", addressing_mode="DEFAULT")
+    db.add(guest)
+    db.flush()
+    token = "guest_" + secrets.token_urlsafe(48)
+    db.add(ServiceSession(user_id=guest.id, token_hash=token_hash(token),
+                          expires_at=now + timedelta(days=1)))
+    db.commit()
+    return {"token": token}
 
 
 @router.get(
@@ -379,7 +415,7 @@ def logout(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    raw = request.cookies.get(settings.session_cookie_name)
+    raw = session_credential(request, settings)
     if raw:
         service_session = db.scalar(
             select(ServiceSession).where(ServiceSession.token_hash == token_hash(raw))

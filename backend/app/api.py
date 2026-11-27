@@ -73,6 +73,7 @@ from .voice import (
     create_voice_connection,
     release_tts,
     reserve_tts,
+    lock_account,
     renew_voice_connection,
 )
 
@@ -171,6 +172,13 @@ def create_consultation(
 ):
     if not user.consent_version or user.consent_version != body.consent_version:
         raise APIError(409, "CONSENT_REQUIRED", "Required consent has not been accepted.")
+    if user.role == "GUEST":
+        lock_account(db, user.id)
+        previous = db.scalar(select(Consultation).where(Consultation.user_id == user.id))
+        if previous:
+            if previous.status in {"ENDING", "ENDED", "FAILED"} or ensure_utc(previous.call_ends_at) <= datetime.now(timezone.utc):
+                raise APIError(409, "GUEST_PASS_USED", "이 비회원 이용권의 상담이 끝났어요.")
+            return consultation_response(previous)
     consultation = Consultation(
         user_id=user.id,
         deck_size=78,
