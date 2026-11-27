@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -44,8 +45,11 @@ def aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def frontend_auth_error_url(settings: Settings) -> str:
-    return f"{settings.public_web_origin.rstrip('/')}/login?auth_error=failed"
+def frontend_auth_error_url(settings: Settings, request_id: str) -> str:
+    params = {"auth_error": "failed"}
+    if re.fullmatch(r"req_[a-f0-9]{32}", request_id):
+        params["auth_request_id"] = request_id
+    return f"{settings.public_web_origin.rstrip('/')}/login?{urlencode(params)}"
 
 
 def classify_database_operational_error(exc: OperationalError) -> tuple[str, Optional[str], str]:
@@ -105,14 +109,10 @@ def current_user(
     settings: Settings = Depends(get_settings),
 ) -> User:
     if not user:
-        message = "Authentication is required."
+        support_code = None
         if request.method == "GET" and request.url.path == "/api/v1/users/me":
-            message = (
-                "The session cookie was rejected."
-                if settings.session_cookie_name in request.cookies
-                else "The session cookie was missing."
-            )
-        raise APIError(401, "AUTHENTICATION_REQUIRED", message)
+            support_code = "LGN-004" if settings.session_cookie_name in request.cookies else "LGN-003"
+        raise APIError(401, "AUTHENTICATION_REQUIRED", "Authentication is required.", support_code=support_code)
     return user
 
 
@@ -221,7 +221,10 @@ def authorize(
                 provider,
                 type(exc).__name__,
             )
-        return RedirectResponse(frontend_auth_error_url(settings), status_code=302)
+        return RedirectResponse(
+            frontend_auth_error_url(settings, request_id), status_code=302,
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
 
 
 async def exchange_profile(
@@ -301,7 +304,8 @@ async def callback(
     binding = request.cookies.get(cookie_name)
     now = datetime.now(timezone.utc)
     if not binding:
-        raise APIError(400, "OAUTH_STATE_INVALID", "The OAuth attempt cookie was missing.")
+        logger.warning("OAuth attempt cookie missing request_id=%r", request.state.request_id)
+        raise APIError(400, "OAUTH_STATE_INVALID", "The OAuth state is invalid or has expired.")
     if db.scalar(
         update(OAuthAttempt)
         .where(

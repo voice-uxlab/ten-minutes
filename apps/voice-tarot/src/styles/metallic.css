@@ -420,6 +420,18 @@
   line-height: 20px;
   color: #ddd;
 }
+.login-recovery-message {
+  display: grid;
+  gap: 3px;
+}
+.login-recovery-message code {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.login-recovery > .text-button {
+  justify-self: start;
+  min-height: 44px;
+}
 .question-progress [data-current="true"] {
   color: var(--pink);
   font-weight: 500;

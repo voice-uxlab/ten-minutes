@@ -6,12 +6,13 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createConsultation, reportsKey } from "@/api/consultations";
-import { FastApiError } from "@/api/client";
 import {
+  AuthLookupError,
   AuthSessionError,
   authOptions,
   authorizeUrl,
   consentVersion,
+  loginRequestId,
   logout,
   saveMemberProfile,
 } from "@/api/auth";
@@ -57,6 +58,8 @@ function LandingIntro() {
 function AuthCheckNotice() {
   const [showNotice, setShowNotice] = useState(false);
   const navigate = useNavigate();
+  const { search } = useLocation();
+  const returnedFromOAuth = new URLSearchParams(search).get("auth_callback") === "session_issued";
   const queryClient = useQueryClient();
   useEffect(() => {
     const noticeTimer = window.setTimeout(() => setShowNotice(true), 3000);
@@ -65,13 +68,16 @@ function AuthCheckNotice() {
         queryKey: authOptions.queryKey,
         exact: true,
       });
-      navigate("/login", { replace: true });
+      navigate(returnedFromOAuth ? "/login?auth_callback=session_issued" : "/login", {
+        replace: true,
+        state: { lookupFailure: { supportCode: "LGN-007" } },
+      });
     }, 8000);
     return () => {
       window.clearTimeout(noticeTimer);
       window.clearTimeout(deadlineTimer);
     };
-  }, [navigate, queryClient]);
+  }, [navigate, queryClient, returnedFromOAuth]);
 
   return (
     <p className="auth-check-notice" role="status">
@@ -86,19 +92,25 @@ function AuthCheckNotice() {
   );
 }
 
+type LoginLookupFailure = {
+  supportCode: AuthLookupError["supportCode"] | "LGN-007";
+  requestId?: string;
+};
+
 function Login({
   checking = false,
-  lookupStatus,
-  sessionFailure,
+  lookupFailure,
 }: {
   checking?: boolean;
-  lookupStatus?: number | "unavailable";
-  sessionFailure?: Pick<AuthSessionError, "cookie" | "requestId">;
+  lookupFailure?: LoginLookupFailure;
 }) {
   const { pathname, search, hash, state } = useLocation();
   const navigate = useNavigate();
   const [authError, setAuthError] = useState(() =>
     new URLSearchParams(search).get("auth_error"),
+  );
+  const [redirectRequestId, setRedirectRequestId] = useState(() =>
+    loginRequestId(new URLSearchParams(search).get("auth_request_id")),
   );
   const [attempt, setAttempt] = useState(() =>
     loginProvider(sessionStorage.getItem(loginAttemptKey)),
@@ -107,21 +119,20 @@ function Login({
     new URLSearchParams(search).get("auth_callback") === "session_issued",
   );
   const [retried, setRetried] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
   const recentLogin = loginProvider(localStorage.getItem(recentLoginKey));
   const showRecovery = !checking && Boolean(attempt || authError || sessionIssued);
-  const status = retried ? undefined : lookupStatus;
-  let diagnostic = "OAuth 복귀 후 로그인 상태를 확인하지 못했어요. (OAUTH_RETURN_UNCONFIRMED)";
-  if (authError === "failed") {
-    diagnostic = "카카오 인증을 시작하지 못했어요. (OAUTH_AUTHORIZE_FAILED)";
-  } else if (authError && authError !== "cancelled") {
-    diagnostic = "인증 서버가 로그인 실패를 반환했어요. (OAUTH_FAILED)";
-  } else if (status === 401) {
-    diagnostic = "로그인 상태 조회에서 유효한 세션을 확인하지 못했어요. (GET /api/v1/users/me · HTTP 401)";
-  } else if (typeof status === "number") {
-    diagnostic = `로그인 상태 조회 요청이 실패했어요. (GET /api/v1/users/me · HTTP ${status})`;
-  } else if (status === "unavailable") {
-    diagnostic = "로그인 상태 조회 응답을 확인하지 못했어요. (AUTH_LOOKUP_UNAVAILABLE)";
-  }
+  const cancelled = authError === "cancelled";
+  const lookup = retried ? undefined : lookupFailure;
+  const supportCode = authError === "failed"
+    ? "LGN-001"
+    : cancelled
+      ? "LGN-009"
+      : authError
+        ? "LGN-002"
+        : (lookup?.supportCode ?? "LGN-008");
+  const requestId = authError ? redirectRequestId : lookup?.requestId;
+  const supportId = requestId ? `${supportCode}/${requestId}` : supportCode;
   useEffect(() => {
     if (checking) return;
     const consumeAttempt = () => {
@@ -139,17 +150,29 @@ function Login({
     const error = params.get("auth_error");
     if (error === null && !params.has("auth_callback")) return;
     if (error !== null) setAuthError(error);
+    setRedirectRequestId(loginRequestId(params.get("auth_request_id")));
     if (params.get("auth_callback") === "session_issued") setSessionIssued(true);
     params.delete("auth_error");
     params.delete("auth_callback");
+    params.delete("auth_request_id");
     navigate({ pathname, search: params.toString(), hash }, { replace: true, state });
   }, [hash, navigate, pathname, search, state]);
   function startLogin() {
     setRetried(true);
+    setCopyStatus("");
+    setRedirectRequestId(undefined);
     setSessionIssued(false);
     setAttempt(null);
     setAuthError(null);
     sessionStorage.setItem(loginAttemptKey, "kakao");
+  }
+  async function copySupportId() {
+    try {
+      await navigator.clipboard.writeText(supportId);
+      setCopyStatus("문의 ID를 복사했어요.");
+    } catch {
+      setCopyStatus("자동으로 복사하지 못했어요. 화면의 문의 ID를 직접 복사해 주세요.");
+    }
   }
   return (
     <section
@@ -164,38 +187,33 @@ function Login({
           onClick={startLogin}
           aria-describedby={showRecovery ? "login-recovery-message" : undefined}
         >
-          카카오로 시작하기
+          {showRecovery ? "카카오로 다시 로그인" : "카카오로 시작하기"}
           {recentLogin && <span className="recent-login-label">최근 로그인</span>}
         </a>
         {showRecovery && (
-          <p
-            className="login-recovery"
-            id="login-recovery-message"
-            role="alert"
-          >
-            <strong>
-              {authError === "cancelled"
-                ? "로그인을 취소했어요."
-                : "소셜 로그인을 완료할 수 없습니다."}
-            </strong>
-            {authError !== "cancelled" && <span>{diagnostic}</span>}
-            {authError !== "cancelled" && (
-              <span>{sessionIssued ? "콜백 응답에서 세션 쿠키 발급 확인" : "콜백의 세션 쿠키 발급 여부 미확인"}</span>
-            )}
-            {status === 401 && (
+          <div className="login-recovery">
+            <div
+              className="login-recovery-message"
+              id="login-recovery-message"
+              role="alert"
+            >
+              <strong>
+                {cancelled ? "로그인을 취소했어요." : "로그인을 완료하지 못했어요."}
+              </strong>
+              <span>다시 로그인해 주세요.</span>
               <span>
-                {sessionFailure?.cookie === "missing"
-                  ? "API에 세션 쿠키가 도착하지 않았어요. (SESSION_COOKIE_MISSING)"
-                  : sessionFailure?.cookie === "rejected"
-                    ? "API가 받은 세션 쿠키를 유효한 세션으로 확인하지 못했어요. (SESSION_COOKIE_REJECTED)"
-                    : "API의 세션 쿠키 수신 여부를 확인할 수 없어요. (SESSION_COOKIE_UNKNOWN)"}
+                문의 ID <code>{supportId}</code>
               </span>
-            )}
-            {!retried && sessionFailure?.requestId && (
-              <span>요청 ID {sessionFailure.requestId}</span>
-            )}
-            <span>다시 로그인해 주세요.</span>
-          </p>
+            </div>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => void copySupportId()}
+            >
+              문의 정보 복사
+            </button>
+            {copyStatus && <p role="status">{copyStatus}</p>}
+          </div>
         )}
       </div>
       <div className="login-policies">
@@ -404,27 +422,20 @@ export function Home() {
   const nick = confirmedUser && (confirmedUser.nickname || "공주");
   if (isLogin || hasAuthError || !nick) {
     const checking = !isLogin && !hasAuthError && auth.isPending;
-    const lookupStatus = isLogin
-      ? state?.lookupStatus
-      : auth.error instanceof FastApiError
-        ? auth.error.status
+    const lookupFailure: LoginLookupFailure | undefined = isLogin
+      ? state?.lookupFailure
+      : auth.error instanceof AuthLookupError
+        ? { supportCode: auth.error.supportCode, requestId: auth.error.requestId }
         : auth.isError
-          ? "unavailable"
-          : auth.data === null
-            ? 401
-            : undefined;
-    const sessionFailure = isLogin
-      ? state?.sessionFailure
-      : auth.error instanceof AuthSessionError
-        ? { cookie: auth.error.cookie, requestId: auth.error.requestId }
-        : undefined;
+          ? { supportCode: "LGN-007" }
+          : undefined;
     return (
       <>
-        <Login checking={checking} lookupStatus={lookupStatus} sessionFailure={sessionFailure} />
+        <Login checking={checking} lookupFailure={lookupFailure} />
         {!isLogin && !checking && (
           <Navigate
             to={`/login${hasAuthError || new URLSearchParams(search).has("auth_callback") ? search : ""}`}
-            state={{ lookupStatus, sessionFailure }}
+            state={{ lookupFailure }}
             replace
           />
         )}

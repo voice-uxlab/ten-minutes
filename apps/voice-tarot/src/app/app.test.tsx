@@ -61,6 +61,9 @@ test.each(["responds", "times out"])(
   async (outcome) => {
     vi.useFakeTimers();
     try {
+      if (outcome === "times out") {
+        history.replaceState({}, "", "/?auth_callback=session_issued");
+      }
       let respond: ((response: Response) => void) | undefined;
       let signal: AbortSignal | null | undefined;
       vi.mocked(fetch).mockImplementation((_path, options) => {
@@ -86,6 +89,7 @@ test.each(["responds", "times out"])(
       } else {
         await act(() => vi.advanceTimersByTimeAsync(5000));
         expect(signal?.aborted).toBe(true);
+        expect(screen.getByRole("alert").textContent).toContain("LGN-007");
       }
       expect(window.location.pathname).toBe("/login");
       expect(screen.queryByText(notice)).toBeNull();
@@ -102,7 +106,7 @@ test("cancelled social login offers retry", async () => {
   expect((await screen.findByRole("alert")).textContent).toContain(
     "로그인을 취소했어요.",
   );
-  const kakao = screen.getByRole("link", { name: "카카오로 시작하기" });
+  const kakao = screen.getByRole("link", { name: "카카오로 다시 로그인" });
   expect(screen.queryByRole("link", { name: /네이버/ })).toBeNull();
   expect(kakao.getAttribute("href")).toMatch(/\/auth\/kakao\/authorize$/);
   const alert = screen.getByRole("alert");
@@ -112,40 +116,50 @@ test("cancelled social login offers retry", async () => {
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
 });
 
-test("failed OAuth initialization displays an authorization diagnostic", async () => {
-  history.replaceState({}, "", "/login?auth_error=failed");
+test("failed OAuth initialization displays a support ID and clears the URL", async () => {
+  const requestId = `req_${"a".repeat(32)}`;
+  history.replaceState({}, "", `/login?auth_error=failed&auth_request_id=${requestId}`);
   render(<App />);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "OAUTH_AUTHORIZE_FAILED",
+    `LGN-001/${requestId}`,
   );
+  expect(screen.queryByText(/OAUTH_AUTHORIZE_FAILED/)).toBeNull();
+  await waitFor(() => expect(window.location.search).toBe(""));
 });
 
-test("OAuth return without a valid session displays the lookup status", async () => {
+test("OAuth return without a recognized session error displays the fallback support ID", async () => {
   sessionStorage.setItem("voice-tarot:login-attempt", "kakao");
   render(<App />);
   await waitFor(() => expect(window.location.pathname).toBe("/login"));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "GET /api/v1/users/me · HTTP 401",
+    "LGN-005",
   );
 });
 
-test.each(["missing", "rejected"])(
-  "OAuth return reports a %s session cookie even without session storage",
-  async (cookie) => {
+test.each(["LGN-003", "LGN-004"])(
+  "OAuth return displays and copies only %s and its request ID",
+  async (supportCode) => {
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, "writeText");
     const requestId = `req_${"a".repeat(32)}`;
     history.replaceState({}, "", "/?auth_callback=session_issued");
     vi.mocked(fetch).mockImplementation(async () =>
       Response.json({ error: {
-        message: `The session cookie was ${cookie}.`,
+        message: "Authentication is required.",
+        support_code: supportCode,
         request_id: requestId,
       } }, { status: 401 }),
     );
     render(<App />);
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("콜백 응답에서 세션 쿠키 발급 확인");
-    expect(alert.textContent).toContain(`SESSION_COOKIE_${cookie.toUpperCase()}`);
-    expect(alert.textContent).toContain(requestId);
+    const supportId = `${supportCode}/${requestId}`;
+    expect(alert.textContent).toContain("로그인을 완료하지 못했어요.");
+    expect(alert.textContent).toContain(supportId);
+    expect(alert.textContent).not.toMatch(/세션|쿠키|HTTP|\/api\/|SESSION_COOKIE/);
+    await user.click(screen.getByRole("button", { name: "문의 정보 복사" }));
+    await screen.findByText("문의 ID를 복사했어요.");
+    expect(copy).toHaveBeenCalledExactlyOnceWith(supportId);
     await waitFor(() => expect(window.location.search).toBe(""));
   },
 );
@@ -161,11 +175,11 @@ test("returning to the login page after leaving for OAuth restores retry", async
   expect(screen.queryByRole("alert")).toBeNull();
   fireEvent(window, new Event("pageshow"));
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("소셜 로그인을 완료할 수 없습니다.");
-  expect(alert.textContent).toContain("OAUTH_RETURN_UNCONFIRMED");
+  expect(alert.textContent).toContain("로그인을 완료하지 못했어요.");
+  expect(alert.textContent).toContain("LGN-008");
   expect(alert.textContent).toContain("다시 로그인해 주세요.");
   expect(kakao.getAttribute("aria-describedby")).toBe(alert.id);
-  expect(screen.queryByRole("link", { name: /로그인 다시 시도/ })).toBeNull();
+  expect(screen.getByRole("link", { name: "카카오로 다시 로그인" })).toBe(kakao);
   expect(sessionStorage.getItem("voice-tarot:login-attempt")).toBeNull();
   cleanup();
   render(<App />);

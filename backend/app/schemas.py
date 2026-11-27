@@ -23,6 +23,7 @@ class ErrorDetail(StrictModel):
     code: str = Field(description="Stable error code used by the frontend for error handling")
     message: str = Field(description="Human-readable error message")
     request_id: str = Field(description="Request identifier used to correlate Vercel and application logs")
+    support_code: Optional[str] = Field(default=None, description="Reference code for login support")
     diagnostics: Optional[TTSDiagnostics] = None
 
 
