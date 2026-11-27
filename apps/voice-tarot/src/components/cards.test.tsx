@@ -1,5 +1,12 @@
 import { existsSync } from "node:fs";
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { cards } from "../../shared/cards.ts";
 import { Cards } from "./cards";
@@ -41,4 +48,34 @@ test("a shuffled card shows its own image only after reveal", () => {
   expect(image.classList.contains("tarot-card-reversed")).toBe(true);
   expect(image.parentElement?.className).toBe("tarot-card-face");
   expect(screen.queryByText("TAROT")).toBeNull();
+});
+
+test("each newly focused card turns from its back to the loaded artwork", async () => {
+  const spread = [3, 36, 50].map((id, index) => ({
+    ...cards[id],
+    slot: index + 1,
+    number: index + 1,
+    position: "나",
+  }));
+  const { container, rerender } = render(<Cards cards={spread} revealed={[]} />);
+  const wrappers = Array.from(
+    container.querySelectorAll<HTMLDivElement>(".card-wrap"),
+  );
+  for (const [index, card] of spread.entries()) {
+    const flip = wrappers[index].querySelector<HTMLElement>(".tarot-card-flip")!;
+    const back = flip.querySelector(".tarot-card-back img");
+    const revealed = spread.slice(0, index + 1).map(({ slot }) => slot);
+    rerender(<Cards cards={spread} revealed={revealed} focus={card.slot} />);
+
+    const front = within(wrappers[index]).getByRole("img", { name: card.name });
+    expect(flip.querySelector(".tarot-card-back img")).toBe(back);
+    expect(flip.style.transform).toContain("rotateY(180deg)");
+    expect(wrappers.filter((wrapper) => !wrapper.hidden)).toEqual([
+      wrappers[index],
+    ]);
+    fireEvent.load(front);
+    await waitFor(() => expect(flip.style.transform).toBe("none"), {
+      timeout: 1500,
+    });
+  }
 });

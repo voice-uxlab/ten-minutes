@@ -301,6 +301,9 @@ export class Consultation {
                 ? slots.map((n) => s.positions[n - 1]).join(" / ")
                 : `${s.cards.length}장 종합 리딩`,
               active: slots,
+              ...(slots.length
+                ? {}
+                : { caption: "", status: "레나가 생각하는 중" }),
             };
           }
         }
